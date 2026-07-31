@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zoujunrong/Nexuspouch/internal/protocol"
+	"github.com/nexuspouch/nexuspouch/internal/protocol"
 )
 
 // PeerRPC is optional live-session outbound store RPC (wired from peer.SessionRegistry).

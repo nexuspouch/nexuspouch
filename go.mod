@@ -1,4 +1,4 @@
-module github.com/zoujunrong/Nexuspouch
+module github.com/nexuspouch/nexuspouch
 
 go 1.23
 

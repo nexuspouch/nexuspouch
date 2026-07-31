@@ -43,5 +43,5 @@ go run ./cmd/nexuspouch \
 ## 模块
 
 ```text
-github.com/zoujunrong/Nexuspouch
+github.com/nexuspouch/nexuspouch
 ```

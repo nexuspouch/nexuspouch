@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zoujunrong/Nexuspouch/internal/noise"
+	"github.com/nexuspouch/nexuspouch/internal/noise"
 )
 
 func TestIdentityFingerprintStable(t *testing.T) {

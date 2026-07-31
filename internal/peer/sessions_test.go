@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zoujunrong/Nexuspouch/internal/noise"
+	"github.com/nexuspouch/nexuspouch/internal/noise"
 )
 
 func TestEncryptUnderWriteMuPreservesDecryptOrder(t *testing.T) {

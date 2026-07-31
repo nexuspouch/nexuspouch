@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zoujunrong/Nexuspouch/internal/protocol"
-	"github.com/zoujunrong/Nexuspouch/internal/store"
+	"github.com/nexuspouch/nexuspouch/internal/protocol"
+	"github.com/nexuspouch/nexuspouch/internal/store"
 )
 
 func TestWriteResumeAndHashMismatch(t *testing.T) {

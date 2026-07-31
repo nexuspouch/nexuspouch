@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/zoujunrong/Nexuspouch/internal/protocol"
+	"github.com/nexuspouch/nexuspouch/internal/protocol"
 )
 
 // WipeSelf clears this node's own device tree (four partitions + staging).

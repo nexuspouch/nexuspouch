@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zoujunrong/Nexuspouch/internal/protocol"
+	"github.com/nexuspouch/nexuspouch/internal/protocol"
 )
 
 const maxChunk = 65536

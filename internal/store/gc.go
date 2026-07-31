@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zoujunrong/Nexuspouch/internal/protocol"
+	"github.com/nexuspouch/nexuspouch/internal/protocol"
 )
 
 // GcStaging removes abandoned staging sessions older than olderThan

@@ -4,8 +4,8 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"github.com/zoujunrong/Nexuspouch/internal/protocol"
-	"github.com/zoujunrong/Nexuspouch/internal/store"
+	"github.com/nexuspouch/nexuspouch/internal/protocol"
+	"github.com/nexuspouch/nexuspouch/internal/store"
 )
 
 func TestImportRequestGrantAndPrivateRead(t *testing.T) {
