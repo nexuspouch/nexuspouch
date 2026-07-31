@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/shepaw/Nexuspouch/internal/protocol"
+	"github.com/zoujunrong/Nexuspouch/internal/protocol"
 )
 
 // PurgeDevice permanently removes another device's mirror tree and clears its

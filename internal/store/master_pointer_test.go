@@ -3,8 +3,8 @@ package store_test
 import (
 	"testing"
 
-	"github.com/shepaw/Nexuspouch/internal/protocol"
-	"github.com/shepaw/Nexuspouch/internal/store"
+	"github.com/zoujunrong/Nexuspouch/internal/protocol"
+	"github.com/zoujunrong/Nexuspouch/internal/store"
 )
 
 func TestMasterPointerQueryDefault(t *testing.T) {

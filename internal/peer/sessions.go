@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/shepaw/Nexuspouch/internal/noise"
+	"github.com/zoujunrong/Nexuspouch/internal/noise"
 )
 
 // liveSession is one Noise-encrypted peer WS transport.

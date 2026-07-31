@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"sync"
 
-	"github.com/shepaw/Nexuspouch/internal/noise"
+	"github.com/zoujunrong/Nexuspouch/internal/noise"
 )
 
 // PairingRequest matches Dart PairingRequest JSON.

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shepaw/Nexuspouch/internal/protocol"
-	"github.com/shepaw/Nexuspouch/internal/store"
+	"github.com/zoujunrong/Nexuspouch/internal/protocol"
+	"github.com/zoujunrong/Nexuspouch/internal/store"
 )
 
 func TestWriteCommitRead(t *testing.T) {

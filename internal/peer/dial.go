@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/shepaw/Nexuspouch/internal/noise"
+	"github.com/zoujunrong/Nexuspouch/internal/noise"
 )
 
 const dialTimeout = 12 * time.Second

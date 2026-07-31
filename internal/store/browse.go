@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shepaw/Nexuspouch/internal/protocol"
+	"github.com/zoujunrong/Nexuspouch/internal/protocol"
 )
 
 // AdminList lists files under device/space[/path] without peer ACL / import grant.

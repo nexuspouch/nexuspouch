@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/shepaw/Nexuspouch/internal/noise"
-	"github.com/shepaw/Nexuspouch/internal/protocol"
-	"github.com/shepaw/Nexuspouch/internal/store"
+	"github.com/zoujunrong/Nexuspouch/internal/noise"
+	"github.com/zoujunrong/Nexuspouch/internal/protocol"
+	"github.com/zoujunrong/Nexuspouch/internal/store"
 )
 
 func TestReconnectKnownPeer(t *testing.T) {

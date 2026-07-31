@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/shepaw/Nexuspouch/internal/admin"
+	"github.com/zoujunrong/Nexuspouch/internal/admin"
 )
 
 func TestAuthorizeLoopbackWithoutToken(t *testing.T) {

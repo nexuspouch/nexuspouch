@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shepaw/Nexuspouch/internal/protocol"
+	"github.com/zoujunrong/Nexuspouch/internal/protocol"
 )
 
 var uploadIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)

@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/shepaw/Nexuspouch/internal/noise"
-	"github.com/shepaw/Nexuspouch/internal/peer"
-	"github.com/shepaw/Nexuspouch/internal/protocol"
-	"github.com/shepaw/Nexuspouch/internal/store"
+	"github.com/zoujunrong/Nexuspouch/internal/noise"
+	"github.com/zoujunrong/Nexuspouch/internal/peer"
+	"github.com/zoujunrong/Nexuspouch/internal/protocol"
+	"github.com/zoujunrong/Nexuspouch/internal/store"
 )
 
 // Server exposes privileged admin APIs over the local store (M7 headless).

@@ -13,10 +13,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shepaw/Nexuspouch/internal/admin"
-	"github.com/shepaw/Nexuspouch/internal/peer"
-	"github.com/shepaw/Nexuspouch/internal/protocol"
-	"github.com/shepaw/Nexuspouch/internal/store"
+	"github.com/zoujunrong/Nexuspouch/internal/admin"
+	"github.com/zoujunrong/Nexuspouch/internal/peer"
+	"github.com/zoujunrong/Nexuspouch/internal/protocol"
+	"github.com/zoujunrong/Nexuspouch/internal/store"
 )
 
 func TestAdminAuthTokenRequired(t *testing.T) {
