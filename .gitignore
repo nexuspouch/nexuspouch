@@ -1,0 +1,19 @@
+# Binaries
+/nexuspouch
+/storage-node
+*.exe
+*.test
+*.out
+
+# Local store / runtime data
+/data/
+*.db
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# AI scratch
+.ai_workspace/
