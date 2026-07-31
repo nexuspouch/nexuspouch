@@ -1,47 +1,69 @@
 # Nexuspouch
 
-无头 store master 节点：实现 `store.*` 协议语义与 ACL，可与 [ShePaw](https://github.com/shepaw/shepaw) App（Flutter `lib/storage`）配对互通。
+Rust headless storage node for the ShePaw ecosystem. Implements `store.*` over Noise-encrypted WebSocket peer connections, with a local admin UI for pairing and management.
 
-本仓库由 ShePaw 的 `storage-node` 拆出独立维护。
+Wire format is compatible with the ShePaw Flutter app (`Noise_IK_25519_ChaChaPoly_BLAKE2b`, `shepaw://peer` QR URLs, store control frames).
 
-## 范围
+## Requirements
 
-- 路径规范化 + ACL；本机目录树 `list/meta/read/write/commit/delete/stats/recycle/import.*`
-- `commit.retention`（`keep_last` / `gfs`）
-- HTTP `/health`、`/store`（联调 JSON）
-- **Noise IK 配对**：`/peer/ws`（信封 v2 + `Noise_IK_25519_ChaChaPoly_BLAKE2b`，prologue `shepaw-acp/2.1`）；device_id = Noise fingerprint
-- **无头管理面** `/admin`：配对 QR/批准、用量、回收站、换机导入审批；token 或 loopback 鉴权
+- Rust 1.70+ (edition 2021)
+- macOS / Linux (Unix filesystem semantics)
 
-协议权威说明见 [`docs/storage_protocol_spec.md`](docs/storage_protocol_spec.md)；共享 fixture 在 [`docs/storage_fixtures/`](docs/storage_fixtures/)。
-
-## 与 ShePaw 的互操作
-
-为保持与现有 App 扫码配对兼容，线协议仍使用：
-
-- QR：`shepaw://peer?...`
-- Noise prologue：`shepaw-acp/2.1`
-
-管理鉴权环境变量优先读 `NEXUSPOUCH_*`，并兼容旧的 `SHEPAW_*`。
-
-## 运行
+## Build
 
 ```bash
-go test ./...
-go run ./cmd/nexuspouch \
-  -root /var/lib/nexuspouch \
-  -listen :8787 \
-  -name "nas-master" \
-  -admin-token "$NEXUSPOUCH_ADMIN_TOKEN"
+cargo test
+cargo build --release
 ```
 
-1. 打开 `http://127.0.0.1:8787/admin/`，点「开始配对」得到 `shepaw://peer?...` QR。
-2. ShePaw App 扫码发起配对；节点 `/admin` 出现入站请求后批准。
-3. 配对成功后 App 可经 Noise 加密 WS 发送 store 控制帧。
+The release binary is `target/release/nexuspouch`.
 
-身份文件：`<root>/.system/noise_identity.json`；配对表：`paired_peers.json`。
+## Run
 
-## 模块
+```bash
+cargo run -- --root ./data --listen :8787 --name nexuspouch
+```
 
-```text
-github.com/nexuspouch/nexuspouch
+### CLI flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--root` | `./data` | Store root directory |
+| `--listen` | `:8787` | HTTP listen address (`:8787` → `0.0.0.0:8787`) |
+| `--name` | `nexuspouch` | Device display name for pairing |
+| `--admin-token` | env | Admin API/UI token (`NEXUSPOUCH_ADMIN_TOKEN` or `SHEPAW_ADMIN_TOKEN`) |
+| `--channel` | env | Channel WS endpoint for QR (`NEXUSPOUCH_CHANNEL_ENDPOINT` or `SHEPAW_CHANNEL_ENDPOINT`) |
+| `--device` | Noise fp | Override device_id (must match Noise fingerprint) |
+
+When `--admin-token` is unset, `/admin` and `/admin/api/*` accept requests without a Bearer token (use only on trusted networks).
+
+## HTTP endpoints
+
+| Path | Description |
+|------|-------------|
+| `GET /health` | Liveness + device fingerprint |
+| `POST /store` | Loopback store debug API (token or loopback client) |
+| `GET /peer/ws` | Noise pairing, reconnect, encrypted store frames |
+| `GET /admin` | Admin UI (pairing, stats, recycle, import) |
+| `/admin/api/*` | Admin JSON API |
+
+## Identity & storage layout
+
+- Noise identity: `<root>/.system/noise_identity.json` (STANDARD base64 keys)
+- `device_id` = first 8 bytes of `sha256(static_pub)` as 16 lowercase hex
+- Master pointer: `<root>/.system/master_pointer.json` (created on first open)
+- Paired peers: `<root>/.system/paired_peers.json`
+
+## Protocol
+
+See [docs/storage_protocol_spec.md](docs/storage_protocol_spec.md) and shared fixtures in [docs/storage_fixtures/](docs/storage_fixtures/).
+
+## Development
+
+```bash
+# Run fixture + noise tests only
+cargo test protocol:: noise::
+
+# Run with logging
+RUST_LOG=info cargo run -- --root ./data
 ```

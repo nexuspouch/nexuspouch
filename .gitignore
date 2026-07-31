@@ -17,3 +17,6 @@
 
 # AI scratch
 .ai_workspace/
+
+# Rust
+/target/
