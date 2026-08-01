@@ -106,6 +106,9 @@
 
 ### Step 1（文档化，零代码）
 
+> 状态：✅ 已落地（本分支）——`storage_protocol_spec.md` §0.5 空间属性模型
+> + `docs/CLIENT_PROFILES.md`（ShePaw 首个客户端 profile）。
+
 - 协议规范新增「空间属性模型」章节，把四分区重述为属性的实例；
 - 发布「客户端 profile」模板，ShePaw 作为首个 profile 收录（快照/附件/GFS/URI 语义）。
 

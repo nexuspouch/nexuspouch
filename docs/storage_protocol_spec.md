@@ -1,6 +1,7 @@
 # ShePaw 存储空间协议规范（store.*）
 
-> 版本：v4.2（M0 修订：store URI 规范、op 扩展策略、agent 身份承载。与方案 v1.1 对齐：跨端读权威=master；CAS=远端读缓存；GFS 本机执行）
+> 版本：v4.3（Step 1 文档化：空间属性模型 + 三层边界。承接 v4.2：store URI 规范、
+> op 扩展策略、agent 身份承载。与方案 v1.1 对齐：跨端读权威=master；CAS=远端读缓存；GFS 本机执行）
 > 状态：Dart（ShePaw App）与 Rust（Nexuspouch）实现的权威定义。上游设计：`docs/storage_space_plan.md`。
 > 共享 fixture：`docs/storage_fixtures/`（path 攻击 + ACL 用例）。
 > 传输：复用 `PeerConnection` 控制帧（WS + Noise E2E）与 Channel Tunnel；本协议不新增传输。
@@ -11,12 +12,44 @@
 |------|------|
 | 设备目录 | `<device_id>/`，每端实体数据的唯一归属；`device_id` = Noise 静态公钥哈希（16 hex）。 |
 | master | 镜像汇聚点 + 跨端读取权威。同一时间唯一；M2 默认本机（loopback），指定/迁移见方案 §6.5（M6）。 |
-| space | 目录分区：`artifacts` / `files` / `attachments` / `backups`。 |
+| space | 属性驱动的目录分区（见 §0.5 空间属性模型）。内置：`artifacts` / `files` / `attachments` / `backups`。 |
 | staging | `<device_id>/<space>/.staging/<upload_id>/`，未 commit 的半成品，对 `list`/恢复不可见。 |
 | `.recycle` | 回收站（store 根级系统目录），删除与被覆盖旧版本的最终去处（覆盖先经 `.versions` 再修剪，见 §2.6/§1.5）；仅 master 本机用户可清空。 |
 | `.versions` | 版本库（store 根级系统目录），被覆盖旧版本的不可变存档；仅内部 `versions.*` op 可访问。 |
 | `.nexuspouch` | 任务元数据目录（`<space>/<task>/.nexuspouch/`），manifest / 状态 / ack 记录；仅内部 op 可读。 |
 | trust_level | 配对信任分级（`paired_peers.trust_level`）：`owner`（自己的设备）/ `friend`（预留，本期拒绝一切 store.*）。 |
+
+## 0.5 空间属性模型（v4.3 通用化边界，Step 1 文档化）
+
+空间不再是协议写死的四个名字，而是「属性驱动的分区」——**行为由属性决定，名字只是 key**。
+
+### 0.5.1 属性
+
+| 属性 | 取值 | 含义 |
+|------|------|------|
+| `visibility` | `shared` \| `private` | `shared` → owner 端可读他端；`private` → 仅本端 + 显式例外（导入授权 / 迁移 seed） |
+| `encryption` | `client` \| `none` | `client` → 内容离开设备前必须已加密，节点不持有密钥、不做解密 |
+| `retention` | `keep_last` \| `gfs` \| `none` | 原语，参数由调用方按内容给；执行方可为本机或属主设备 |
+| `import_grant` | `allowed` \| `denied` | 换机导入授权是否允许该空间（迁移例外显式化） |
+
+### 0.5.2 内置 profile（v4 兼容，行为不变）
+
+| space | visibility | encryption | retention | import_grant |
+|-------|-----------|-----------|-----------|--------------|
+| `artifacts` | shared | none | none | allowed |
+| `files` | shared | none | none | allowed |
+| `attachments` | private | client | none | allowed |
+| `backups` | private | client | gfs（属主设备本机执行） | allowed |
+
+### 0.5.3 边界
+
+- 自定义空间经 admin `space.declare` 声明（Step 2 落地），声明时校验命名与保留前缀；
+- `dot` 前缀目录仍为系统保留（`.system` / `.recycle` / `.versions` / `.staging` /
+  `.nexuspouch`），任何空间都不可寻址；
+- 业务约定（快照格式、附件寻址、GFS 用法、`task_id` 语义）**不属于协议层**，
+  见 [docs/CLIENT_PROFILES.md](CLIENT_PROFILES.md)（ShePaw 客户端 profile）；
+- 边界判定：新需求问「节点需要理解它才能正确执行吗？」——不需要 → 放客户端 profile；
+  需要 → 才进协议通用层。
 
 ## 1. 帧格式
 
