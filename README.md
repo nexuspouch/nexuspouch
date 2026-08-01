@@ -58,6 +58,12 @@ When `--admin-token` is unset, `/admin` and `/admin/api/*` accept requests witho
 
 See [docs/storage_protocol_spec.md](docs/storage_protocol_spec.md) and shared fixtures in [docs/storage_fixtures/](docs/storage_fixtures/).
 
+## Implemented
+
+- `master.migrate` with online seed from previous master, mirror hash gate, and outbound dial via `Dialer`
+- `commit.retention` policies (`keep_last`, `gfs`) after successful promote
+- `stats.volume_*` and `volume_warn` (Unix `statvfs`; omitted on non-Unix)
+
 ## Development
 
 ```bash

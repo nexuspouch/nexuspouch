@@ -238,6 +238,9 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
         });
     }
 
+    let retention_device = batch.first().map(|p| p.u.device.clone());
+    let retention_space = batch.first().map(|p| p.u.space.clone());
+
     let mut committed = Vec::new();
     let mut failed = Vec::new();
     for p in batch {
@@ -275,6 +278,14 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
             "size": p.size,
             "sha256": p.sum,
         }));
+    }
+
+    if !committed.is_empty() {
+        if let (Some(device), Some(space)) = (retention_device, retention_space) {
+            if let Some(retention) = frame.payload.get("retention") {
+                super::retention::apply_retention(local, &device, &space, retention);
+            }
+        }
     }
 
     let mut out = Map::new();

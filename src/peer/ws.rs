@@ -219,15 +219,18 @@ impl PeerServer {
     }
 
     async fn serve_transport(self: Arc<Self>, socket: WebSocket, sess: Session, fp: String) {
-        self.sessions.add(fp.clone(), sess);
+        let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel();
+        let session_id = self.sessions.register(fp.clone(), sess, out_tx);
         let (mut sink, mut stream) = socket.split();
 
-        while let Some(msg) = stream.next().await {
-            let msg = match msg {
-                Ok(Message::Text(t)) => t,
-                Ok(Message::Close(_)) | Err(_) => break,
-                _ => continue,
-            };
+        loop {
+            tokio::select! {
+                msg = stream.next() => {
+                    let msg = match msg {
+                        Some(Ok(Message::Text(t))) => t,
+                        Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                        _ => continue,
+                    };
             let fr = match noise::decode_frame(&msg) {
                 Ok(f) if f.frame_type == noise::FrameType::Data => f,
                 _ => continue,
@@ -296,8 +299,13 @@ impl PeerServer {
                     let _ = sink.send(msg).await;
                 }
             }
+                }
+                Some(out) = out_rx.recv() => {
+                    let _ = sink.send(out).await;
+                }
+            }
         }
-        self.sessions.remove(&fp);
+        self.sessions.remove(&fp, session_id);
     }
 
     fn build_store_reply(

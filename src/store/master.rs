@@ -84,38 +84,3 @@ pub fn pointer_apply(local: &Local, frame: &crate::protocol::Frame) -> Result<Ma
         ("epoch".into(), json!(epoch)),
     ]))
 }
-
-pub fn migrate(local: &Local, _frame: &crate::protocol::Frame) -> Result<Map<String, Value>, OpError> {
-    let cur = load_pointer(local)?;
-    let mut epoch = cur.epoch + 1;
-    if epoch < 1 {
-        epoch = 1;
-    }
-    let next = MasterPointer {
-        master: local.device_id.clone(),
-        epoch,
-    };
-    save_pointer(local, &next)?;
-    let cursors = local.cursors().all()?;
-    let mut cursor_map = Map::new();
-    for (k, v) in cursors {
-        cursor_map.insert(k, json!(v));
-    }
-    Ok(Map::from_iter([
-        ("master".into(), json!(next.master)),
-        ("epoch".into(), json!(next.epoch)),
-        ("old_master_reachable".into(), json!(false)),
-        ("cursors".into(), Value::Object(cursor_map)),
-        ("seeded_files".into(), json!(0)),
-        (
-            "hash_gate".into(),
-            json!({
-                "ran": false,
-                "ok": true,
-                "devices": [],
-                "mismatches": [],
-                "mismatch_count": 0
-            }),
-        ),
-    ]))
-}

@@ -171,6 +171,23 @@ pub fn stats(local: &Local) -> Result<Map<String, Value>, OpError> {
             );
         }
     }
+    if let Some((total, free)) = super::volume::probe_volume(&local.root) {
+        let mut used_ratio = 0.0;
+        if total > 0 {
+            let mut used = total - free;
+            if used < 0 {
+                used = 0;
+            }
+            if used > total {
+                used = total;
+            }
+            used_ratio = used as f64 / total as f64;
+        }
+        out.insert("volume_total_bytes".into(), json!(total));
+        out.insert("volume_free_bytes".into(), json!(free));
+        out.insert("volume_used_ratio".into(), json!(used_ratio));
+        out.insert("volume_warn".into(), json!(used_ratio >= 0.8));
+    }
     Ok(out)
 }
 

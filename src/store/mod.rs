@@ -4,6 +4,9 @@ pub mod gc;
 pub mod import;
 pub mod maintenance;
 pub mod master;
+pub mod migrate_seed;
+pub mod retention;
+pub mod volume;
 pub mod write;
 
 use crate::protocol::{self, AclVerdict, Frame};
@@ -15,6 +18,21 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+pub trait PeerRpc: Send + Sync {
+    fn has(&self, device_id: &str) -> bool;
+    fn call(
+        &self,
+        device_id: &str,
+        op: &str,
+        payload: Map<String, Value>,
+    ) -> Result<Map<String, Value>, String>;
+}
+
+pub trait PeerEnsure: Send + Sync {
+    fn ensure(&self, device_id: &str) -> Result<(), String>;
+    fn release(&self, device_id: &str);
+}
 
 pub const MAX_CHUNK: usize = 65536;
 
@@ -49,6 +67,8 @@ pub struct Local {
     cursors: DeviceCursors,
     seed_auth: Mutex<HashMap<String, Instant>>,
     gc_stop: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    peer_rpc: Mutex<Option<Arc<dyn PeerRpc>>>,
+    peer_ensure: Mutex<Option<Arc<dyn PeerEnsure>>>,
 }
 
 impl Local {
@@ -70,6 +90,8 @@ impl Local {
             cursors: DeviceCursors::new(&root),
             seed_auth: Mutex::new(HashMap::new()),
             gc_stop: Mutex::new(None),
+            peer_rpc: Mutex::new(None),
+            peer_ensure: Mutex::new(None),
         };
         let ptr_path = local.pointer_path();
         if !ptr_path.exists() {
@@ -119,7 +141,7 @@ impl Local {
             }
             "master.pointer.query" => master::pointer_query(self),
             "master.pointer" => master::pointer_apply(self, &frame),
-            "master.migrate" => master::migrate(self, &frame),
+            "master.migrate" => migrate_seed::master_migrate(self, &frame),
             op => Err(OpError::new("bad_op", op)),
         }
     }
@@ -196,6 +218,22 @@ impl Local {
         payload: &Map<String, Value>,
     ) -> Result<(), OpError> {
         import::receive_pushed_grant(self, from_device, payload)
+    }
+
+    pub fn set_peer_rpc(&self, rpc: Arc<dyn PeerRpc>) {
+        *self.peer_rpc.lock().unwrap() = Some(rpc);
+    }
+
+    pub fn set_peer_ensure(&self, ensure: Arc<dyn PeerEnsure>) {
+        *self.peer_ensure.lock().unwrap() = Some(ensure);
+    }
+
+    pub(crate) fn peer_rpc(&self) -> Option<Arc<dyn PeerRpc>> {
+        self.peer_rpc.lock().unwrap().clone()
+    }
+
+    pub(crate) fn peer_ensure(&self) -> Option<Arc<dyn PeerEnsure>> {
+        self.peer_ensure.lock().unwrap().clone()
     }
 
     pub fn start_periodic_gc(self: &Arc<Self>, every: Duration) {

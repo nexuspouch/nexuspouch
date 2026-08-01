@@ -9,7 +9,7 @@ use clap::Parser;
 use nexuspouch::{
     admin::{self, handler::AdminState, auth::is_loopback},
     noise::Identity,
-    peer::{advertise_local_ws, PairingHub, PeerServer, PeerStore, SessionRegistry},
+    peer::{advertise_local_ws, Dialer, PairingHub, PeerServer, PeerStore, SessionRegistry},
     protocol,
     store::{gc, Local},
 };
@@ -123,6 +123,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let sessions = Arc::new(SessionRegistry::new());
     let local_endpoint = advertise_local_ws(&args.listen);
+
+    let dialer = Arc::new(Dialer::new(
+        Arc::clone(&identity),
+        Arc::clone(&peers),
+        Arc::clone(&sessions),
+        local_endpoint.clone(),
+        channel_endpoint.clone(),
+    ));
+    let rpc: Arc<dyn nexuspouch::store::PeerRpc> = sessions.clone();
+    store.set_peer_rpc(rpc);
+    let ensure: Arc<dyn nexuspouch::store::PeerEnsure> = dialer.clone();
+    store.set_peer_ensure(ensure);
 
     let peer_srv = Arc::new(PeerServer {
         store: Arc::clone(&store),
