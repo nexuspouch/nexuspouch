@@ -207,6 +207,7 @@ pub fn check_acl(frame: &Frame, caller_device_id: &str, trust_level: &str, loopb
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use std::fs;
     use std::path::PathBuf;
 
@@ -252,6 +253,78 @@ mod tests {
             let expect = c["expect"].as_str().unwrap();
             let v = check_acl(&frame, caller, trust, loopback);
             assert_eq!(v.as_str(), expect, "{}", c["name"].as_str().unwrap());
+        }
+    }
+
+    #[test]
+    fn version_cases_fixture_contract() {
+        // M0: validate the v4.2 URI/version contract fixture (docs/storage_protocol_spec.md §1.5).
+        // Behavior is implemented in M2; this test locks the schema both ends must consume.
+        let raw = fs::read_to_string(fixtures_dir().join("version_cases.json")).unwrap();
+        let doc: Value = serde_json::from_str(&raw).unwrap();
+        let cases = doc["cases"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        let allowed = ["ok", "bad_uri", "bad_path", "ambiguous_ref", "not_found"];
+        let mut names = HashSet::new();
+        for c in cases {
+            let name = c["name"].as_str().unwrap();
+            assert!(names.insert(name.to_string()), "duplicate case {name}");
+            let uri = c["uri"].as_str().unwrap();
+            assert!(uri.starts_with("store://"), "{name}: scheme must be store");
+            let expect = c["expect"].as_str().unwrap();
+            assert!(allowed.contains(&expect), "{name}: bad expect {expect}");
+            if expect == "ok" {
+                assert!(c.get("space").is_some(), "{name}: ok case needs space");
+                assert!(c.get("device").is_some(), "{name}: ok case needs device");
+                assert!(c.get("path").is_some(), "{name}: ok case needs path");
+                let kind = c["ref_kind"].as_str().unwrap();
+                assert!(
+                    ["latest", "hash", "seq"].contains(&kind),
+                    "{name}: bad ref_kind {kind}"
+                );
+            }
+            if expect == "bad_path" {
+                let rel = uri.split_once("store://").unwrap().1;
+                assert!(
+                    rel.split('/').any(|s| s.starts_with('.')),
+                    "{name}: bad_path cases must target a dot-prefixed segment"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn agent_acl_cases_fixture_contract() {
+        // M0: validate the agent ACL contract fixture (docs/AGENTS.md §4, spec §12).
+        // Behavior is implemented in M4; this test locks the schema both ends must consume.
+        let raw = fs::read_to_string(fixtures_dir().join("agent_acl_cases.json")).unwrap();
+        let doc: Value = serde_json::from_str(&raw).unwrap();
+        let cases = doc["cases"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        let allowed = ["allow", "denyAcl", "quota_exceeded", "denyUntrusted"];
+        let mut names = HashSet::new();
+        for c in cases {
+            let name = c["name"].as_str().unwrap();
+            assert!(names.insert(name.to_string()), "duplicate case {name}");
+            let expect = c["expect"].as_str().unwrap();
+            assert!(allowed.contains(&expect), "{name}: bad expect {expect}");
+            assert!(c["op"].as_str().is_some(), "{name}: op required");
+            // Loopback cases are device-only and need no agent binding.
+            if c.get("loopback").and_then(|v| v.as_bool()).unwrap_or(false) {
+                continue;
+            }
+            assert!(
+                c.get("agent").is_some() || c.get("token_bound_agent").is_some(),
+                "{name}: agent or token binding required"
+            );
+            assert!(c["registered"].as_bool().is_some(), "{name}: registered required");
+            assert!(c["status"].as_str().is_some(), "{name}: status required");
+            assert!(c["scopes"].as_array().is_some(), "{name}: scopes required");
+            if c.get("quota").is_some() {
+                let q = &c["quota"];
+                assert!(q["max_bytes"].as_u64().is_some(), "{name}: quota.max_bytes");
+                assert!(q["bytes_used"].as_u64().is_some(), "{name}: quota.bytes_used");
+            }
         }
     }
 }
