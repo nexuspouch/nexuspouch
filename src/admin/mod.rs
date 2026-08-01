@@ -42,6 +42,10 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/tokens", get(tokens_list))
         .route("/tokens", post(tokens_create))
         .route("/tokens/revoke", post(tokens_revoke))
+        .route("/agents", get(agents_list))
+        .route("/agents", post(agents_create))
+        .route("/agents/revoke", post(agents_revoke))
+        .route("/agents/reset-quota", post(agents_reset))
         .route("/reprotect", post(reprotect))
         .with_state(state.clone());
 
@@ -291,6 +295,7 @@ async fn tokens_list(State(state): State<Arc<AdminState>>, headers: HeaderMap) -
 struct TokenCreateBody {
     label: Option<String>,
     scopes: Option<Vec<String>>,
+    agent_id: Option<String>,
 }
 
 async fn tokens_create(
@@ -301,7 +306,7 @@ async fn tokens_create(
     let label = body.label.unwrap_or_else(|| "api".into());
     let scopes = body.scopes.unwrap_or_else(|| vec!["read".into()]);
     auth_json(state, headers, None, move |s| {
-        handler::tokens_create(s, label, scopes)
+        handler::tokens_create(s, label, scopes, body.agent_id)
     })
     .await
 }
@@ -317,6 +322,54 @@ async fn tokens_revoke(
     Json(body): Json<TokenRevokeBody>,
 ) -> Response {
     auth_json(state, headers, None, move |s| handler::tokens_revoke(s, body.id)).await
+}
+
+#[derive(Deserialize)]
+struct AgentCreateBody {
+    name: String,
+    scopes: Vec<String>,
+    #[serde(default = "default_max_bytes")]
+    max_bytes: u64,
+}
+
+fn default_max_bytes() -> u64 {
+    1024 * 1024 * 1024
+}
+
+async fn agents_list(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    auth_json(state, headers, None, handler::agents_list).await
+}
+
+async fn agents_create(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Json(body): Json<AgentCreateBody>,
+) -> Response {
+    auth_json(state, headers, None, move |s| {
+        handler::agents_create(s, body.name, body.scopes, body.max_bytes)
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct AgentIdBody {
+    id: String,
+}
+
+async fn agents_revoke(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Json(body): Json<AgentIdBody>,
+) -> Response {
+    auth_json(state, headers, None, move |s| handler::agents_revoke(s, body.id)).await
+}
+
+async fn agents_reset(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Json(body): Json<AgentIdBody>,
+) -> Response {
+    auth_json(state, headers, None, move |s| handler::agents_reset_quota(s, body.id)).await
 }
 
 #[derive(Deserialize, Default)]

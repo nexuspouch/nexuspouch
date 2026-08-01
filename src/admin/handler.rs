@@ -8,6 +8,7 @@ pub struct AdminState {
     pub store: Arc<Local>,
     pub auth: super::auth::AuthConfig,
     pub device: String,
+    pub agents: Arc<crate::agents::AgentRegistry>,
     pub hub: Option<Arc<PairingHub>>,
     pub peers: Option<Arc<PeerStore>>,
     pub sessions: Option<Arc<SessionRegistry>>,
@@ -249,6 +250,7 @@ pub fn tokens_create(
     state: &AdminState,
     label: String,
     scopes: Vec<String>,
+    agent_id: Option<String>,
 ) -> Result<Map<String, Value>, OpError> {
     let store = state
         .auth
@@ -256,7 +258,7 @@ pub fn tokens_create(
         .as_ref()
         .ok_or_else(|| OpError::new("internal", "token store unavailable"))?;
     let t = store
-        .create(&label, scopes)
+        .create(&label, scopes, agent_id)
         .map_err(|e| OpError::new("bad_op", e))?;
     Ok(Map::from_iter([
         ("id".into(), json!(t.id)),
@@ -264,7 +266,60 @@ pub fn tokens_create(
         ("label".into(), json!(t.label)),
         ("scopes".into(), json!(t.scopes)),
         ("created_ms".into(), json!(t.created_ms)),
+        ("agent_id".into(), json!(t.agent_id)),
     ]))
+}
+
+pub fn agents_list(state: &AdminState) -> Result<Map<String, Value>, OpError> {
+    Ok(Map::from_iter([(
+        "agents".into(),
+        Value::Array(
+            state
+                .agents
+                .list_public()
+                .into_iter()
+                .map(Value::Object)
+                .collect(),
+        ),
+    )]))
+}
+
+pub fn agents_create(
+    state: &AdminState,
+    name: String,
+    scopes: Vec<String>,
+    max_bytes: u64,
+) -> Result<Map<String, Value>, OpError> {
+    let a = state
+        .agents
+        .create(&name, scopes, max_bytes)
+        .map_err(|e| OpError::new("bad_op", e))?;
+    Ok(Map::from_iter([
+        ("id".into(), json!(a.id)),
+        ("name".into(), json!(a.name)),
+        ("scopes".into(), json!(a.scopes)),
+        ("status".into(), json!(a.status)),
+        (
+            "quota".into(),
+            json!({"max_bytes": a.quota.max_bytes, "bytes_used": a.quota.bytes_used}),
+        ),
+    ]))
+}
+
+pub fn agents_revoke(state: &AdminState, id: String) -> Result<Map<String, Value>, OpError> {
+    let ok = state
+        .agents
+        .revoke(&id)
+        .map_err(|e| OpError::new("internal", e))?;
+    Ok(Map::from_iter([("ok".into(), json!(ok)), ("id".into(), json!(id))]))
+}
+
+pub fn agents_reset_quota(state: &AdminState, id: String) -> Result<Map<String, Value>, OpError> {
+    let ok = state
+        .agents
+        .reset_quota(&id)
+        .map_err(|e| OpError::new("internal", e))?;
+    Ok(Map::from_iter([("ok".into(), json!(ok)), ("id".into(), json!(id))]))
 }
 
 pub fn tokens_revoke(state: &AdminState, id: String) -> Result<Map<String, Value>, OpError> {

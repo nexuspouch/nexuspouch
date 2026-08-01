@@ -4,6 +4,7 @@ use std::io::Read;
 pub struct Client {
     base: String,
     token: String,
+    agent: Option<String>,
 }
 
 impl Client {
@@ -11,6 +12,20 @@ impl Client {
         Self {
             base: base.into().trim_end_matches('/').to_string(),
             token: token.into(),
+            agent: None,
+        }
+    }
+
+    pub fn with_agent(mut self, agent: impl Into<String>) -> Self {
+        self.agent = Some(agent.into());
+        self
+    }
+
+    fn auth(&self, req: ureq::Request) -> ureq::Request {
+        let req = req.set("Authorization", &format!("Bearer {}", self.token));
+        match &self.agent {
+            Some(a) => req.set("x-agent-id", a),
+            None => req,
         }
     }
 
@@ -54,8 +69,8 @@ impl Client {
 
     pub fn read_text(&self, uri: &str) -> Result<Vec<u8>, String> {
         let url = self.read_url(uri);
-        let resp = ureq::get(&url)
-            .set("Authorization", &format!("Bearer {}", self.token))
+        let resp = self
+            .auth(ureq::get(&url))
             .call()
             .map_err(|e| e.to_string())?;
         resp.into_string()
@@ -71,10 +86,7 @@ impl Client {
             offset,
             length
         );
-        let resp = match ureq::get(&url)
-            .set("Authorization", &format!("Bearer {}", self.token))
-            .call()
-        {
+        let resp = match self.auth(ureq::get(&url)).call() {
             Ok(r) => r,
             Err(ureq::Error::Status(code, resp)) => {
                 return Err(api_status_err(
@@ -106,8 +118,8 @@ impl Client {
     pub fn store_op(&self, op: &str, payload: Map<String, Value>) -> Result<Value, String> {
         let url = format!("{}/api/v1/store", self.base);
         let body = json!({"op": op, "payload": payload});
-        let resp = match ureq::post(&url)
-            .set("Authorization", &format!("Bearer {}", self.token))
+        let resp = match self
+            .auth(ureq::post(&url))
             .set("Content-Type", "application/json")
             .send_bytes(body.to_string().as_bytes())
         {
@@ -137,10 +149,7 @@ impl Client {
     }
 
     fn get_json(&self, url: &str) -> Result<Value, String> {
-        match ureq::get(url)
-            .set("Authorization", &format!("Bearer {}", self.token))
-            .call()
-        {
+        match self.auth(ureq::get(url)).call() {
             Ok(r) => parse_json_response(r),
             Err(ureq::Error::Status(code, resp)) => Err(api_status_err(
                 code,

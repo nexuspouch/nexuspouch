@@ -132,6 +132,26 @@ td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid
     <p class="muted">scoped token：read=只读 API/WebDAV；write=可写 store（不含 wipe/migrate）；events=SSE；admin=全权限。</p>
   </div>
   <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2>Agents（agent 身份）</h2>
+      <button id="loadAgentsBtn">刷新</button>
+    </div>
+    <div class="row">
+      <input id="agentName" placeholder="名称" style="min-width:8rem"/>
+      <select id="agentScope">
+        <option value="store:read">store:read</option>
+        <option value="store:write">store:write</option>
+        <option value="store:write:artifacts">store:write:artifacts</option>
+        <option value="store:write:files">store:write:files</option>
+        <option value="store:write,store:delete">store:write + store:delete</option>
+      </select>
+      <input id="agentMaxBytes" type="number" value="1073741824" style="min-width:7rem" title="max_bytes"/>
+      <button id="createAgent">创建 Agent</button>
+    </div>
+    <pre id="agentList" class="muted" style="margin-top:.5rem">…</pre>
+    <p class="muted">agent 经 scoped token 的 agent_id 或 MCP --agent 绑定；作用域外的操作返回 acl_denied / quota_exceeded（审计记录）。</p>
+  </div>
+  <div class="card">
     <h2>危险区</h2>
     <p class="muted">清空本机四分区正式文件与暂存（不删他端镜像、回收站、.system）。不可从回收站还原。</p>
     <div class="row">
@@ -495,6 +515,35 @@ $('createToken').onclick = async () => {
     });
     alert('Token (copy now):\n' + out.token);
     loadTokens();
+  } catch (e) { $('msg').textContent = String(e.message||e); }
+};
+async function loadAgents() {
+  try {
+    const out = await api('/admin/api/agents');
+    const agents = out.agents || [];
+    $('agentList').textContent = agents.length
+      ? agents.map(a =>
+          a.id + ' · ' + a.name + ' · [' + (a.scopes||[]).join(',') + '] · ' +
+          (a.status) + ' · ' + (a.quota.bytes_used||0) + '/' + (a.quota.max_bytes||0) + 'B')
+        .join('\n')
+      : '(no agents)';
+  } catch (e) {
+    $('agentList').textContent = String(e.message||e);
+  }
+}
+$('loadAgentsBtn').onclick = () => { loadAgents(); };
+$('createAgent').onclick = async () => {
+  try {
+    const name = ($('agentName').value || 'agent').trim();
+    const scopes = $('agentScope').value.split(',').map(s => s.trim()).filter(Boolean);
+    const max_bytes = parseInt($('agentMaxBytes').value || '0', 10);
+    const out = await api('/admin/api/agents', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name, scopes, max_bytes}),
+    });
+    alert('Agent created: ' + out.id);
+    loadAgents();
   } catch (e) { $('msg').textContent = String(e.message||e); }
 };
 $('runReprotect').onclick = async () => {

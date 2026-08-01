@@ -14,6 +14,8 @@ pub struct ApiToken {
     pub scopes: Vec<String>,
     pub label: String,
     pub created_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -65,13 +67,24 @@ impl TokenStore {
                     ("label".into(), json!(t.label)),
                     ("scopes".into(), json!(t.scopes)),
                     ("created_ms".into(), json!(t.created_ms)),
+                    ("agent_id".into(), json!(t.agent_id)),
                 ])
             })
             .collect()
     }
 
-    pub fn create(&self, label: &str, scopes: Vec<String>) -> Result<ApiToken, String> {
+    pub fn create(
+        &self,
+        label: &str,
+        scopes: Vec<String>,
+        agent_id: Option<String>,
+    ) -> Result<ApiToken, String> {
         let scopes = normalize_scopes(scopes)?;
+        if let Some(ref a) = agent_id {
+            if !a.starts_with("a-") || a.len() != 9 {
+                return Err(format!("invalid agent_id: {a}"));
+            }
+        }
         let mut bytes = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut bytes);
         let token = format!("np_{}", hex::encode(bytes));
@@ -81,6 +94,7 @@ impl TokenStore {
             scopes,
             label: label.to_string(),
             created_ms: now_ms(),
+            agent_id,
         };
         let mut g = self.inner.lock().unwrap();
         g.tokens.push(entry.clone());
@@ -107,6 +121,19 @@ impl TokenStore {
         for t in &g.tokens {
             if bool::from(t.token.as_bytes().ct_eq(presented.as_bytes())) {
                 return Some(t.scopes.clone());
+            }
+        }
+        None
+    }
+
+    pub fn resolve_agent(&self, presented: &str) -> Option<String> {
+        if presented.is_empty() {
+            return None;
+        }
+        let g = self.inner.lock().unwrap();
+        for t in &g.tokens {
+            if bool::from(t.token.as_bytes().ct_eq(presented.as_bytes())) {
+                return t.agent_id.clone();
             }
         }
         None
@@ -165,7 +192,7 @@ mod tests {
     fn create_resolve_revoke() {
         let dir = tempdir().unwrap();
         let store = TokenStore::open(dir.path());
-        let t = store.create("ci", vec!["read".into()]).unwrap();
+        let t = store.create("ci", vec!["read".into()], None).unwrap();
         assert!(t.token.starts_with("np_"));
         let scopes = store.resolve(&t.token).unwrap();
         assert!(scopes_allow(&scopes, &["read"]));

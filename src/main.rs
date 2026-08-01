@@ -75,6 +75,11 @@ enum Command {
     },
     /// Serve MCP (Model Context Protocol) over stdio for AI agents
     Mcp,
+    /// Serve MCP bound to a specific agent identity (x-agent-id header)
+    McpAgent {
+        #[arg(long)]
+        agent: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -163,12 +168,12 @@ fn cmd_reprotect(args: &Args, password: Option<String>, copy: bool) -> Result<()
     Ok(())
 }
 
-async fn cmd_mcp(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+async fn cmd_mcp(args: &Args, agent: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let listen_port = discovery::parse_listen_port(&args.listen);
     let base = format!("http://127.0.0.1:{listen_port}");
     let token = admin_token(args);
     let (_, device) = load_identity_device(args)?;
-    nexuspouch::mcp::run(base, token, device).await
+    nexuspouch::mcp::run(base, token, device, agent).await
 }
 
 #[tokio::main]
@@ -183,7 +188,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::Reprotect { password, copy }) => {
             return cmd_reprotect(&args, password.clone(), *copy);
         }
-        Some(Command::Mcp) => return cmd_mcp(&args).await,
+        Some(Command::Mcp) => return cmd_mcp(&args, None).await,
+        Some(Command::McpAgent { agent }) => return cmd_mcp(&args, Some(agent.clone())).await,
         None => {}
     }
 
@@ -204,6 +210,7 @@ async fn serve(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     store.set_event_bus(Arc::clone(&event_bus));
     let token_store = Arc::new(TokenStore::open(&args.root));
     let auth_cfg = nexuspouch::AuthConfig::new(token.clone(), Some(Arc::clone(&token_store)));
+    let agents = Arc::new(nexuspouch::AgentRegistry::open(&args.root));
     if let Ok(n) = gc::gc_staging(&store, Duration::ZERO) {
         if n > 0 {
             tracing::info!("gc staging: removed {n} abandoned uploads");
@@ -271,6 +278,7 @@ async fn serve(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         store: Arc::clone(&store),
         auth: auth_cfg.clone(),
         device: device.clone(),
+        agents: Arc::clone(&agents),
         hub: Some(Arc::clone(&hub)),
         peers: Some(Arc::clone(&peers)),
         sessions: Some(Arc::clone(&sessions)),
@@ -288,6 +296,7 @@ async fn serve(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         device: device.clone(),
         events: Arc::clone(&event_bus),
         mdns: mdns_advertising,
+        agents: Arc::clone(&agents),
     });
     let webdav_state = Arc::new(WebDavState {
         store: Arc::clone(&store),

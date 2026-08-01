@@ -62,6 +62,26 @@ impl AuthConfig {
         None
     }
 
+    /// Agent binding for a request: `x-agent-id` header wins, otherwise the
+    /// bearer token's `agent_id`.
+    pub fn resolve_agent_id(
+        &self,
+        headers: &HeaderMap,
+        query_token: Option<&str>,
+    ) -> Option<String> {
+        if let Some(a) = headers
+            .get("x-agent-id")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return Some(a.to_string());
+        }
+        let presented = presented_token(headers, query_token)?;
+        let store = self.tokens.as_ref()?;
+        store.resolve_agent(presented)
+    }
+
     pub fn no_auth_configured(&self) -> bool {
         self.token.is_empty()
             && self

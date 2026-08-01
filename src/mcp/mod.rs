@@ -66,6 +66,18 @@ impl McpServer {
         }
     }
 
+    pub fn with_agent(
+        base: impl Into<String>,
+        token: impl Into<String>,
+        device: impl Into<String>,
+        agent: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: sdk::Client::new(base, token).with_agent(agent),
+            device: device.into(),
+        }
+    }
+
     /// Process one line of stdin (newline-delimited JSON-RPC).
     /// Returns the response line, or `None` for notifications / empty input.
     pub fn handle_line(&self, line: &str) -> Option<String> {
@@ -508,8 +520,12 @@ pub async fn run(
     base: String,
     token: String,
     device: String,
+    agent: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let server = McpServer::new(base, token, device);
+    let server = match agent {
+        Some(a) => McpServer::with_agent(base, token, device, a),
+        None => McpServer::new(base, token, device),
+    };
     let stdin = tokio::io::stdin();
     let mut lines = tokio::io::BufReader::new(stdin).lines();
     let stdout = tokio::io::stdout();
@@ -555,6 +571,7 @@ mod tests {
             device: DEVICE.to_string(),
             events,
             mdns: false,
+            agents: Arc::new(crate::agents::AgentRegistry::open(dir.path())),
         });
         let app = Router::new().nest("/api/v1", api::router(state));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

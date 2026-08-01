@@ -71,6 +71,22 @@ Base: `/api/v1`
 | GET | `/events` | SSE stream (`event: snapshot` then `event: store`) |
 | GET | `/events/recent` | Last N events as JSON |
 
+## Agents (admin)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/admin/api/agents` | List agents (id/name/scopes/status/quota) |
+| POST | `/admin/api/agents` | Create agent `{"name","scopes":[...],"max_bytes":N}` |
+| POST | `/admin/api/agents/revoke` | Revoke `{"id"}` |
+| POST | `/admin/api/agents/reset-quota` | Reset usage `{"id"}` |
+| POST | `/admin/api/tokens` | Create token; optional `"agent_id"` binds the agent |
+
+Agent-bound requests are enforced per scope (`store:read` / `store:write` /
+`store:write:artifacts` / `store:write:files` / `store:delete`) with byte quota
+and rate limits; violations return 403 `acl_denied` / `quota_exceeded` and are
+audited. `nexuspouch mcp-agent --agent <id>` sends the binding via
+`x-agent-id`.
+
 ## curl examples
 
 ```bash

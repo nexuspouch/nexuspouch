@@ -283,6 +283,10 @@ draft ──commit──> committed ──publish──> published ──ack─�
 
 ## 6. M4：Agent 身份、作用域与配额（6-8 人日）
 
+> 状态：✅ 已落地（本分支）——`.system/agents.json` 注册表、空间级 scopes、
+> 字节配额与令牌桶限速、token 绑定 agent_id / `x-agent-id`（MCP --agent）、
+> admin Agents 管理页与 API、审计带 agent_id、agent ACL fixture 行为对齐。
+
 ### 6.1 数据模型
 
 ```json

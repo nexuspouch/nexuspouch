@@ -432,7 +432,7 @@ master 定期（与日快照同节奏）或迁移后：将各 `<device_id>/<spac
   `GET /api/v1/events?since=<seq>` 重放历史再切实时（不丢不重）。
 - v3 → v4：新增 `sync.cursors` / `master.pointer` / `master.pointer.query` /
   `master.migrate`。v3 客户端忽略未知 op 通知，互操作不受影响。
-- **agent 身份承载（M4 实现，v4.2 定稿边界）**：`store.*` 帧仍以设备身份鉴权，
+- **agent 身份承载（M4 已实现，v4.2 定稿边界）**：`store.*` 帧仍以设备身份鉴权，
   帧内不新增 agent 字段；agent 身份仅承载于 HTTP/MCP 层（Bearer token 绑定
   `agent_id`，作用域/配额见 `docs/AGENTS.md`），避免破坏 App 与 Noise peer 兼容面。
 - 双端实现（Dart + Rust）与本规范对齐；攻击/ACL/URI/agent fixture 双端共享

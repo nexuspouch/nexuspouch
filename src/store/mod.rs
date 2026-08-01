@@ -155,6 +155,7 @@ impl Local {
                 frame.space(),
                 frame.device(),
                 frame.payload.get("path").and_then(|v| v.as_str()),
+                None,
             ));
             return Err(OpError::new(code, verdict.as_str()));
         }
@@ -294,6 +295,7 @@ impl Local {
             op,
             kind,
             message,
+            None,
             None,
             None,
             None,

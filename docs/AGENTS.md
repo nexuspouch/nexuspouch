@@ -3,8 +3,8 @@
 Nexuspouch 定位为异构 AI agent 之间**本地优先的产物交接与记忆总线**：任何 agent
 拿到一个 `store://` URI，就能读写、校验、追溯产物，且数据默认不出用户自己的硬件。
 
-> 里程碑状态：M0（协议 v4.2 契约）+ M1（MCP 服务器）+ M2（版本化 URI 与血缘）
-> + M3（交接与事件）已落地；M4 agent 身份与配额；M5 检索。能力按里程碑逐步接通，
+> 里程碑状态：M0-M3 + M4（agent 身份、作用域与配额）已落地；M5 检索。
+> 能力按里程碑逐步接通，
 > 本文档的「目标形态」一节描述的是已实现能力与后续增量。
 
 ## 1. 当前可用（M0 起）
@@ -100,7 +100,7 @@ Claude Code / Codex / Cursor 配置与零依赖 Node 冒烟客户端：
 - 引用格式保持 Markdown 链接 + 一句话描述：
   `[out.md](store://artifacts/<device>/task-41/out.md) — 一句话说明（产出者）`。
 
-## 4. 身份、作用域与配额（M4 落地）
+## 4. 身份、作用域与配额（M4 起可用）
 
 agent 身份承载于 HTTP/MCP 层的 Bearer token（**不**混入 Noise 帧，协议兼容面冻结）：
 
@@ -114,6 +114,9 @@ agent 身份承载于 HTTP/MCP 层的 Bearer token（**不**混入 Noise 帧，�
 - 每个 agent 有 `max_bytes` 配额与速率限制；超限返回 `quota_exceeded`（审计记录）。
 - 未注册 / 已吊销 / token 与 agent 不匹配 → `acl_denied`。
 - 设备信任仍优先：friend 级设备上的任何 agent → `denyUntrusted`。
+- 管理：admin UI「Agents」页或 `POST /admin/api/agents` 创建（scopes + max_bytes），
+  token 经 `POST /admin/api/tokens` 带 `agent_id` 绑定；MCP 可用
+  `nexuspouch mcp-agent --agent <id> --root ...` 直接以该身份运行。
 
 ## 5. 空间占用
 

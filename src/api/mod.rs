@@ -1,4 +1,5 @@
 use crate::admin::auth::{self, AuthConfig};
+use crate::agents::AgentRegistry;
 use crate::events::{EventBus, StoreEvent};
 use crate::protocol::{self, Frame};
 use crate::store::{Local, OpError, MAX_CHUNK};
@@ -30,6 +31,7 @@ pub struct ApiState {
     pub device: String,
     pub events: Arc<EventBus>,
     pub mdns: bool,
+    pub agents: Arc<AgentRegistry>,
 }
 
 pub fn router(state: Arc<ApiState>) -> Router {
@@ -64,6 +66,32 @@ fn unauthorized() -> Response {
         "unauthorized",
     )
         .into_response()
+}
+
+/// Enforce agent scope / quota / rate limits for a request carrying an agent
+/// binding (bearer token `agent_id` or `x-agent-id` header). Returns `Some`
+/// (403 response) on denial, `None` when no agent is bound or checks pass.
+fn agent_check(
+    state: &ApiState,
+    headers: &HeaderMap,
+    query_token: Option<&str>,
+    op: &str,
+    space: &str,
+    write_size: u64,
+) -> Option<Response> {
+    let agent_id = state.auth.resolve_agent_id(headers, query_token)?;
+    match state.agents.check(&agent_id, op, space, write_size) {
+        Ok(()) => None,
+        Err(msg) => {
+            let code = msg.split(':').next().unwrap_or("acl_denied").trim();
+            state.store.audit_action(code, &agent_id, op, &msg);
+            Some((
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": code, "message": msg, "agent_id": agent_id})),
+            )
+                .into_response())
+        }
+    }
 }
 
 fn op_error(e: OpError) -> Response {
@@ -109,6 +137,9 @@ async fn uri_resolve(
         Ok(u) => u,
         Err(e) => return op_error(e),
     };
+    if let Some(resp) = agent_check(&state, &headers, None, "meta", &parsed.space, 0) {
+        return resp;
+    }
     let meta = match &parsed.ref_kind {
         RefKind::Latest => match state.store.handle(
             parsed.to_frame_meta(),
@@ -161,6 +192,9 @@ async fn versions_uri(
     if parsed.path.is_empty() {
         return op_error(OpError::new("bad_path", "versions require a file path"));
     }
+    if let Some(resp) = agent_check(&state, &headers, None, "versions.list", &parsed.space, 0) {
+        return resp;
+    }
     let mut payload = Map::new();
     payload.insert("space".into(), json!(parsed.space));
     payload.insert("device".into(), json!(parsed.device));
@@ -197,6 +231,9 @@ async fn manifest_uri(
         Ok(u) => u,
         Err(e) => return op_error(e),
     };
+    if let Some(resp) = agent_check(&state, &headers, None, "manifest", &parsed.space, 0) {
+        return resp;
+    }
     let mut payload = Map::new();
     payload.insert("space".into(), json!(parsed.space));
     payload.insert("device".into(), json!(parsed.device));
@@ -227,6 +264,13 @@ async fn artifact_state_uri(
 ) -> Response {
     if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
         return unauthorized();
+    }
+    let parsed = match uri::parse(&q.uri) {
+        Ok(u) => u,
+        Err(e) => return op_error(e),
+    };
+    if let Some(resp) = agent_check(&state, &headers, None, "artifact.state", &parsed.space, 0) {
+        return resp;
     }
     let mut payload = Map::new();
     payload.insert("uri".into(), json!(q.uri));
@@ -270,6 +314,9 @@ async fn read_uri(
     };
     if parsed.path.is_empty() {
         return op_error(OpError::new("bad_path", "read requires file path"));
+    }
+    if let Some(resp) = agent_check(&state, &headers, None, "read", &parsed.space, 0) {
+        return resp;
     }
     let length = if q.length == 0 || q.length > MAX_CHUNK {
         MAX_CHUNK
@@ -351,6 +398,9 @@ async fn list_uri(
             ref_kind: RefKind::Latest,
         }
     };
+    if let Some(resp) = agent_check(&state, &headers, None, "list", &parsed.space, 0) {
+        return resp;
+    }
     match state.store.handle(
         parsed.to_frame_list(),
         &state.device,
@@ -399,13 +449,48 @@ async fn store_op(
         )
             .into_response();
     }
+    let space = body
+        .payload
+        .get("space")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let write_size = body
+        .payload
+        .get("size")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if let Some(resp) = agent_check(
+        &state,
+        &headers,
+        None,
+        &body.op,
+        space,
+        if body.op == "write.begin" { write_size } else { 0 },
+    ) {
+        return resp;
+    }
     match state.store.handle(
-        Frame::from_parts(body.op, body.payload),
+        Frame::from_parts(body.op.clone(), body.payload),
         &state.device,
         protocol::TRUST_OWNER,
         loopback,
     ) {
-        Ok(data) => Json(json!({"op": "result", "data": data})).into_response(),
+        Ok(data) => {
+            if let Some(agent) = state.auth.resolve_agent_id(&headers, None) {
+                if let Some(bytes) = data
+                    .get("files")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|f| f.get("size").and_then(|s| s.as_u64()))
+                            .sum::<u64>()
+                    })
+                {
+                    state.agents.record_usage(&agent, bytes);
+                }
+            }
+            Json(json!({"op": "result", "data": data})).into_response()
+        }
         Err(e) => Json(json!({
             "op": "error",
             "code": e.code,
@@ -509,18 +594,20 @@ mod tests {
 
     const DEV: &str = "aaaaaaaaaaaaaaaa";
 
-    async fn spawn_api() -> String {
+    async fn spawn_api() -> (String, Arc<AgentRegistry>) {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(Local::open(dir.path(), DEV).unwrap());
         let events = EventBus::new();
         store.set_event_bus(Arc::clone(&events));
         let auth = crate::AuthConfig::new("", None);
+        let agents = Arc::new(AgentRegistry::open(dir.path()));
         let state = Arc::new(ApiState {
             store,
             auth,
             device: DEV.to_string(),
             events,
             mdns: false,
+            agents: Arc::clone(&agents),
         });
         let app = Router::new().nest("/api/v1", router(state));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -533,7 +620,7 @@ mod tests {
             .await
             .unwrap();
         });
-        format!("http://{addr}")
+        (format!("http://{addr}"), agents)
     }
 
     fn commit_text(client: &crate::sdk::Client, space: &str, rel: &str, content: &str) {
@@ -561,7 +648,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn versions_api_flow() {
-        let base = spawn_api().await;
+        let (base, _agents) = spawn_api().await;
         let client = crate::sdk::Client::new(&base, "");
         let uri = format!("store://artifacts/{DEV}/t-9/out.txt");
 
@@ -595,5 +682,82 @@ mod tests {
         // Unknown version -> not_found.
         let err = client.read_bytes(&format!("{uri}@v99"), 0, 64).unwrap_err();
         assert!(err.contains("not_found"), "{err}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn agent_scope_enforcement() {
+        let (base, agents) = spawn_api().await;
+
+        // Unregistered agent -> acl_denied.
+        let c = crate::sdk::Client::new(&base, "").with_agent("a-0000");
+        let mut begin = Map::new();
+        begin.insert("space".into(), json!("artifacts"));
+        begin.insert("path".into(), json!("t/x.txt"));
+        begin.insert("size".into(), json!(4));
+        begin.insert("sha256".into(), json!("a".repeat(64)));
+        let err = c.store_op("write.begin", begin).unwrap_err();
+        assert!(err.contains("acl_denied"), "{err}");
+
+        // Read-only scope cannot write.
+        let ro = agents
+            .create("ro", vec!["store:read".into()], 1024 * 1024)
+            .unwrap();
+        let c = crate::sdk::Client::new(&base, "").with_agent(&ro.id);
+        let mut begin = Map::new();
+        begin.insert("space".into(), json!("artifacts"));
+        begin.insert("path".into(), json!("t/x.txt"));
+        begin.insert("size".into(), json!(4));
+        begin.insert("sha256".into(), json!("a".repeat(64)));
+        let err = c.store_op("write.begin", begin).unwrap_err();
+        assert!(err.contains("acl_denied"), "{err}");
+        // Read is allowed.
+        assert!(c.list("store://artifacts/aaaaaaaaaaaaaaaa/").is_ok());
+
+        // Space-scoped write: artifacts ok, files denied.
+        let w = agents
+            .create("aw", vec!["store:write:artifacts".into()], 1024 * 1024)
+            .unwrap();
+        let c = crate::sdk::Client::new(&base, "").with_agent(&w.id);
+        let mut begin = Map::new();
+        begin.insert("space".into(), json!("artifacts"));
+        begin.insert("path".into(), json!("t/x.txt"));
+        begin.insert("size".into(), json!(4));
+        begin.insert("sha256".into(), json!("a".repeat(64)));
+        assert!(c.store_op("write.begin", begin).is_ok());
+        let mut begin = Map::new();
+        begin.insert("space".into(), json!("files"));
+        begin.insert("path".into(), json!("t/x.txt"));
+        begin.insert("size".into(), json!(4));
+        begin.insert("sha256".into(), json!("a".repeat(64)));
+        let err = c.store_op("write.begin", begin).unwrap_err();
+        assert!(err.contains("acl_denied"), "{err}");
+
+        // Quota exceeded.
+        let q = agents.create("q", vec!["store:write".into()], 10).unwrap();
+        let c = crate::sdk::Client::new(&base, "").with_agent(&q.id);
+        let mut begin = Map::new();
+        begin.insert("space".into(), json!("artifacts"));
+        begin.insert("path".into(), json!("t/big.txt"));
+        begin.insert("size".into(), json!(1024));
+        begin.insert("sha256".into(), json!("b".repeat(64)));
+        let err = c.store_op("write.begin", begin).unwrap_err();
+        assert!(err.contains("quota_exceeded"), "{err}");
+
+        // Delete requires store:delete.
+        let wd = agents
+            .create("wd", vec!["store:write".into()], 1024 * 1024)
+            .unwrap();
+        let c = crate::sdk::Client::new(&base, "").with_agent(&wd.id);
+        let mut del = Map::new();
+        del.insert("space".into(), json!("artifacts"));
+        del.insert("path".into(), json!("t/x.txt"));
+        let err = c.store_op("delete", del).unwrap_err();
+        assert!(err.contains("acl_denied"), "{err}");
+
+        // Revoked agent denied even for reads.
+        agents.revoke(&ro.id).unwrap();
+        let c = crate::sdk::Client::new(&base, "").with_agent(&ro.id);
+        let err = c.list("store://artifacts/aaaaaaaaaaaaaaaa/").unwrap_err();
+        assert!(err.contains("acl_denied"), "{err}");
     }
 }

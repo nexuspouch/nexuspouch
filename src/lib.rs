@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod agents;
 pub mod api;
 pub mod audit;
 pub mod auth_tokens;
@@ -14,6 +15,7 @@ pub mod uri;
 pub mod webdav;
 
 pub use admin::auth::AuthConfig;
+pub use agents::AgentRegistry;
 pub use auth_tokens::TokenStore;
 pub use events::EventBus;
 pub use noise::Identity;

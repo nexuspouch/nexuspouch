@@ -25,6 +25,8 @@ pub struct AuditEntry {
     pub device: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
 
 pub struct AuditLog {
@@ -114,6 +116,7 @@ pub fn deny_entry(
     space: Option<&str>,
     device: Option<&str>,
     path: Option<&str>,
+    agent_id: Option<&str>,
 ) -> AuditEntry {
     AuditEntry {
         ts_ms: now_ms(),
@@ -126,6 +129,7 @@ pub fn deny_entry(
         space: space.map(str::to_string),
         device: device.map(str::to_string),
         path: path.map(str::to_string),
+        agent_id: agent_id.map(str::to_string),
     }
 }
 
@@ -153,6 +157,7 @@ mod tests {
             "untrusted",
             "denyUntrusted",
             Some("artifacts"),
+            None,
             None,
             None,
         ));
