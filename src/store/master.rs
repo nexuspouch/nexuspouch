@@ -78,6 +78,13 @@ pub fn pointer_apply(local: &Local, frame: &crate::protocol::Frame) -> Result<Ma
             epoch,
         },
     )?;
+    local.emit_event(
+        crate::events::StoreEvent::new("master.pointer", &local.device_id)
+            .with_detail(Map::from_iter([
+                ("master".into(), json!(master)),
+                ("epoch".into(), json!(epoch)),
+            ])),
+    );
     Ok(Map::from_iter([
         ("applied".into(), json!(true)),
         ("master".into(), json!(master)),

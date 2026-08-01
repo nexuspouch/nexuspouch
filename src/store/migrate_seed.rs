@@ -81,6 +81,14 @@ pub fn master_migrate(
         epoch,
     };
     super::master::save_pointer(local, &next)?;
+    local.emit_event(
+        crate::events::StoreEvent::new("master.pointer", &local.device_id)
+            .with_detail(Map::from_iter([
+                ("master".into(), json!(next.master)),
+                ("epoch".into(), json!(next.epoch)),
+                ("migrated".into(), json!(true)),
+            ])),
+    );
     let cursors_raw = local.cursors().all().unwrap_or_default();
     let mut cursors = Map::new();
     for (k, v) in cursors_raw {

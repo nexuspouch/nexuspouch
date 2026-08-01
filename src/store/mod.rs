@@ -9,6 +9,7 @@ pub mod retention;
 pub mod volume;
 pub mod write;
 
+use crate::events::EventBus;
 use crate::protocol::{self, AclVerdict, Frame};
 use cursors::DeviceCursors;
 use import::ImportAuth;
@@ -69,6 +70,7 @@ pub struct Local {
     gc_stop: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     peer_rpc: Mutex<Option<Arc<dyn PeerRpc>>>,
     peer_ensure: Mutex<Option<Arc<dyn PeerEnsure>>>,
+    event_bus: Mutex<Option<Arc<EventBus>>>,
 }
 
 impl Local {
@@ -92,6 +94,7 @@ impl Local {
             gc_stop: Mutex::new(None),
             peer_rpc: Mutex::new(None),
             peer_ensure: Mutex::new(None),
+            event_bus: Mutex::new(None),
         };
         let ptr_path = local.pointer_path();
         if !ptr_path.exists() {
@@ -226,6 +229,16 @@ impl Local {
 
     pub fn set_peer_ensure(&self, ensure: Arc<dyn PeerEnsure>) {
         *self.peer_ensure.lock().unwrap() = Some(ensure);
+    }
+
+    pub fn set_event_bus(&self, bus: Arc<EventBus>) {
+        *self.event_bus.lock().unwrap() = Some(bus);
+    }
+
+    pub(crate) fn emit_event(&self, event: crate::events::StoreEvent) {
+        if let Some(bus) = self.event_bus.lock().unwrap().as_ref() {
+            bus.publish(event);
+        }
     }
 
     pub(crate) fn peer_rpc(&self) -> Option<Arc<dyn PeerRpc>> {

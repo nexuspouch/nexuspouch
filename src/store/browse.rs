@@ -115,10 +115,12 @@ pub fn delete(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
     match move_to_recycle(local, &device, space, &norm) {
         Ok(recycled) => {
             out.insert("recycled".into(), json!(recycled));
+            emit_delete_event(local, space, &device, &norm);
         }
         Err(e) if e.code == "not_found" => {
             out.insert("recycled".into(), json!(""));
             out.insert("already_gone".into(), json!(true));
+            emit_delete_event(local, space, &device, &norm);
         }
         Err(e) => return Err(e),
     }
@@ -127,6 +129,19 @@ pub fn delete(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
         out.insert("applied_seq".into(), json!(applied));
     }
     Ok(out)
+}
+
+fn emit_delete_event(local: &Local, space: &str, device: &str, path: &str) {
+    let uri = crate::uri::StoreUri {
+        space: space.to_string(),
+        device: device.to_string(),
+        path: path.to_string(),
+    };
+    local.emit_event(
+        crate::events::StoreEvent::new("delete", device)
+            .with_uri(uri.format())
+            .with_path(space, path),
+    );
 }
 
 pub fn stats(local: &Local) -> Result<Map<String, Value>, OpError> {
@@ -247,6 +262,10 @@ pub fn recycle_empty(local: &Local) -> Result<Map<String, Value>, OpError> {
     let purged = dir_size(&dir, false);
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).map_err(io_err)?;
+    local.emit_event(
+        crate::events::StoreEvent::new("recycle.empty", &local.device_id)
+            .with_detail(Map::from_iter([("purged_bytes".into(), json!(purged))])),
+    );
     Ok(Map::from_iter([("purged_bytes".into(), json!(purged))]))
 }
 

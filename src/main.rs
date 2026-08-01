@@ -8,11 +8,14 @@ use axum::{
 use clap::Parser;
 use nexuspouch::{
     admin::{self, handler::AdminState, auth::is_loopback},
+    api::{self, ApiState},
     discovery::{self, Discovery},
+    events::EventBus,
     noise::Identity,
     peer::{advertise_local_ws, Dialer, PairingHub, PeerServer, PeerStore, SessionRegistry},
     protocol,
     store::{gc, Local},
+    webdav::{self, WebDavState},
 };
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -109,6 +112,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let store = Arc::new(Local::open(&args.root, &device)?);
+    let event_bus = EventBus::new();
+    store.set_event_bus(Arc::clone(&event_bus));
     if let Ok(n) = gc::gc_staging(&store, Duration::ZERO) {
         if n > 0 {
             tracing::info!("gc staging: removed {n} abandoned uploads");
@@ -189,6 +194,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         listen_port,
     });
 
+    let api_state = Arc::new(ApiState {
+        store: Arc::clone(&store),
+        auth: nexuspouch::AuthConfig {
+            token: token.clone(),
+        },
+        device: device.clone(),
+        events: Arc::clone(&event_bus),
+        mdns: mdns_advertising,
+    });
+    let webdav_state = Arc::new(WebDavState {
+        store: Arc::clone(&store),
+        auth: nexuspouch::AuthConfig {
+            token: token.clone(),
+        },
+    });
+
     let device_log = device.clone();
     let admin_state_health = Arc::clone(&admin_state);
     let admin_state_store = Arc::clone(&admin_state);
@@ -253,7 +274,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .with_state(peer_srv_ws),
         )
-        .merge(admin::router(admin_state_health));
+        .merge(admin::router(admin_state_health))
+        .nest("/api/v1", api::router(api_state))
+        .nest("/dav", webdav::router(webdav_state));
 
   if token.is_empty() {
         tracing::info!("admin: no token set — rely on loopback/network policy");
@@ -263,6 +286,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !channel_endpoint.is_empty() {
         tracing::info!("channel endpoint: {channel_endpoint}");
     }
+    tracing::info!("api: /api/v1  webdav: /dav  events: SSE");
     tracing::info!(
         "nexuspouch device={device_log} name={} root={} listen={listen} local={local_endpoint}",
         args.name,

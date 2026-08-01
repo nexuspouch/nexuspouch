@@ -367,7 +367,15 @@ pub fn receive_pushed_grant(
     if g.expires_at <= 0 {
         g.expires_at = now_ms() + IMPORT_DEFAULT_TTL.as_millis() as i64;
     }
-    local.imports().save_received(g)
+    local.imports().save_received(g.clone())?;
+    local.emit_event(
+        crate::events::StoreEvent::new("import.grant", &local.device_id)
+            .with_detail(Map::from_iter([
+                ("grant_id".into(), json!(grant_id)),
+                ("old_device".into(), json!(old_device)),
+            ])),
+    );
+    Ok(())
 }
 
 fn random_id() -> String {

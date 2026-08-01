@@ -67,6 +67,14 @@ Admin API (Bearer token required when configured):
 | `GET /peer/ws` | Noise pairing, reconnect, encrypted store frames |
 | `GET /admin` | Admin UI (pairing, stats, recycle, import) |
 | `/admin/api/*` | Admin JSON API |
+| `/api/v1/*` | Programmable store HTTP API (see [docs/API.md](docs/API.md)) |
+| `/dav/*` | Read-only WebDAV for `artifacts` and `files` |
+
+## HTTP API & WebDAV
+
+Token-authenticated programmable API at `/api/v1` plus read-only WebDAV at `/dav`. See [docs/API.md](docs/API.md) for URI format, curl examples, and SSE events.
+
+When `--admin-token` is unset, `/api/v1` and `/dav` accept loopback clients only (same as `/admin`).
 
 ## Identity & storage layout
 

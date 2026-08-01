@@ -278,6 +278,21 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
             "size": p.size,
             "sha256": p.sum,
         }));
+        let uri = crate::uri::StoreUri {
+            space: p.u.space.clone(),
+            device: p.u.device.clone(),
+            path: p.u.path.clone(),
+        };
+        local.emit_event(
+            crate::events::StoreEvent::new("commit", &p.u.device)
+                .with_uri(uri.format())
+                .with_path(&p.u.space, &p.u.path)
+                .with_detail(Map::from_iter([
+                    ("size".into(), json!(p.size)),
+                    ("sha256".into(), json!(p.sum)),
+                    ("upload_id".into(), json!(p.id)),
+                ])),
+        );
     }
 
     if !committed.is_empty() {
