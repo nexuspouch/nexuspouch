@@ -46,6 +46,7 @@
 | `hash_mismatch` | commit 校验 sha256 不符 |
 | `not_found` | 目标不存在 |
 | `quota_exceeded` | agent 写入超配额或卷空间预算收紧（见 docs/AGENTS.md） |
+| `state_conflict` | 状态机不允许该转换（如 ack 非 published 产物、重复 ack 已被他人 ack） |
 | `staging_state` | upload_id 状态非法（重复 commit / 未知 id） |
 | `master_offline` | master 不可达（客户端本地判定） |
 | `not_master` | 本节点已非当前 master（fencing：拒绝 sync 写入/`sync.hello`） |
@@ -188,7 +189,37 @@ store://<space>/<device>/<relpath>[@<ref>]
 - `recycle.restore` 移回原路径；原位置已有文件时先将其移入回收站（新版本优先保留语义）。
 - **`recycle.empty` 仅 master 本机用户（loopback）可执行；远端调用一律 `acl_denied`。**
 
-### 2.9 stats — 用量
+### 2.9 handoff.* / artifact.state — 交接与产物状态机（M3 新增）
+
+产物生命周期：`committed → published → acked`；被覆盖的旧版本 → `superseded`
+（仍可经版本引用读取，不可再变）。artifacts 空间默认 `published`；files 空间
+需 `publish: true` 才发布。
+
+```json
+// 交接：commit + 发布 + 上下文（to_agent 可选，事件 handoff.created）
+{"op": "handoff.create", "space": "artifacts", "upload_ids": ["u-1"],
+ "context": "精修后 ack", "to_agent": "a-desktop", "manifest": {...}}
+→ {"op": "result", "data": {"committed": [...], "handoff_uri": "store://...",
+    "state": "published"}}
+
+// 消费方确认（幂等；重复 ack 返回 already_acked=true）
+{"op": "handoff.ack", "uri": "store://artifacts/pc-a/t-41/out.md", "agent_id": "a-desktop"}
+→ {"op": "result", "data": {"uri": "...", "state": "acked", "acked_by": "a-desktop"}}
+
+// 状态 + 血缘查询（uri 可带 @ref 查旧版本）
+{"op": "artifact.state", "uri": "store://artifacts/pc-a/t-41/out.md@v1"}
+→ {"op": "result", "data": {"uri": "...", "state": "superseded",
+    "producer": {...}, "parent_uris": [...], "context": "..."}}
+```
+
+- `handoff.ack` 仅接受 `published` 状态；同 `agent_id` 重复 ack 幂等，
+  他人已 ack 后再 ack → `state_conflict`。ack 记录持久化于
+  `<task>/.nexuspouch/acks.json`。
+- ACL：`handoff.create` 同写组（仅自有目录）；`handoff.ack` 同删除组
+  （自有恒可，他端仅共享分区）；`artifact.state` 同读组。帧可只带 `uri`
+  （服务端解析出 space/device）。
+
+### 2.10 stats — 用量
 
 ```json
 {"op": "stats"}
@@ -396,7 +427,9 @@ master 定期（与日快照同节奏）或迁移后：将各 `<device_id>/<spac
   - 既有 op 增加必填字段或改变语义（含错误码含义）；
   - 加密套件 / prologue / 传输通道改变；
   - 安全边界收窄（ACL 语义收紧必须双端同步并升版本）。
-- 计划中的 v4.2 增量 op（随里程碑落地，先有 fixture 契约）：`versions.list` / `versions.read` / `manifest`（M2）、`handoff.create` / `handoff.ack` / `artifact.state`（M3）。
+- 已落地的 v4.2 增量 op（随里程碑落地，先有 fixture 契约）：`versions.list` / `versions.read` / `manifest`（M2）、`handoff.create` / `handoff.ack` / `artifact.state`（M3）。
+- 事件：`StoreEvent` 携带单调 `seq`；`.system/events.jsonl` 持久化；watcher 用
+  `GET /api/v1/events?since=<seq>` 重放历史再切实时（不丢不重）。
 - v3 → v4：新增 `sync.cursors` / `master.pointer` / `master.pointer.query` /
   `master.migrate`。v3 客户端忽略未知 op 通知，互操作不受影响。
 - **agent 身份承载（M4 实现，v4.2 定稿边界）**：`store.*` 帧仍以设备身份鉴权，

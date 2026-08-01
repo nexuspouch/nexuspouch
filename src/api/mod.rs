@@ -40,6 +40,7 @@ pub fn router(state: Arc<ApiState>) -> Router {
         .route("/list", get(list_uri))
         .route("/versions", get(versions_uri))
         .route("/manifest", get(manifest_uri))
+        .route("/artifact/state", get(artifact_state_uri))
         .route("/store", post(store_op))
         .route("/events", get(events_sse))
         .route("/events/recent", get(events_recent))
@@ -214,6 +215,29 @@ async fn manifest_uri(
             "manifest": data.get("manifest").cloned().unwrap_or(json!(null)),
         }))
         .into_response(),
+        Err(e) => op_error(e),
+    }
+}
+
+async fn artifact_state_uri(
+    State(state): State<Arc<ApiState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Query(q): Query<VersionsQuery>,
+) -> Response {
+    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
+        return unauthorized();
+    }
+    let mut payload = Map::new();
+    payload.insert("uri".into(), json!(q.uri));
+    match state.store.handle(
+        Frame::from_parts("artifact.state", payload),
+        &state.device,
+        protocol::TRUST_OWNER,
+        true,
+    ) {
+        Ok(data) => Json(json!({"uri": data.get("uri").cloned().unwrap_or(json!(null)), "data": data}))
+            .into_response(),
         Err(e) => op_error(e),
     }
 }
@@ -394,6 +418,7 @@ async fn store_op(
 #[derive(Deserialize)]
 struct EventsQuery {
     token: Option<String>,
+    since: Option<u64>,
 }
 
 async fn events_sse(
@@ -407,10 +432,23 @@ async fn events_sse(
         return unauthorized();
     }
 
-    let recent = state.events.recent();
+    let snapshot: futures_util::stream::BoxStream<'static, Result<Event, Infallible>> = match q.since {
+        Some(since) => Box::pin(stream::iter(
+            state
+                .events
+                .replay(since)
+                .into_iter()
+                .map(|ev| sse_event("snapshot", &ev)),
+        )),
+        None => Box::pin(stream::iter(
+            state
+                .events
+                .recent()
+                .into_iter()
+                .map(|ev| sse_event("snapshot", &ev)),
+        )),
+    };
     let rx = state.events.subscribe();
-
-    let snapshot = stream::iter(recent.into_iter().map(|ev| sse_event("snapshot", &ev)));
     let live = stream::unfold(rx, |mut rx| async move {
         loop {
             match rx.recv().await {

@@ -119,7 +119,7 @@ pub fn check_acl(frame: &Frame, caller_device_id: &str, trust_level: &str, loopb
     let device = frame.device().unwrap_or("");
 
     match frame.op.as_str() {
-        "write.begin" | "write.chunk" | "commit" => {
+        "write.begin" | "write.chunk" | "commit" | "handoff.create" => {
             if !space.is_empty() && !is_valid_space(space) {
                 return AclVerdict::DenyBadOp;
             }
@@ -131,7 +131,7 @@ pub fn check_acl(frame: &Frame, caller_device_id: &str, trust_level: &str, loopb
             }
             AclVerdict::Allow
         }
-        "delete" => {
+        "delete" | "handoff.ack" => {
             if space.is_empty() || !is_valid_space(space) {
                 return AclVerdict::DenyBadOp;
             }
@@ -144,7 +144,8 @@ pub fn check_acl(frame: &Frame, caller_device_id: &str, trust_level: &str, loopb
             }
             AclVerdict::Allow
         }
-        "list" | "meta" | "read" | "versions.list" | "versions.read" | "manifest" => {
+        "list" | "meta" | "read" | "versions.list" | "versions.read" | "manifest"
+        | "artifact.state" => {
             if space.is_empty() || !is_valid_space(space) {
                 return AclVerdict::DenyBadOp;
             }
@@ -325,6 +326,22 @@ mod tests {
                 assert!(q["max_bytes"].as_u64().is_some(), "{name}: quota.max_bytes");
                 assert!(q["bytes_used"].as_u64().is_some(), "{name}: quota.bytes_used");
             }
+        }
+    }
+
+    #[test]
+    fn handoff_fixture() {
+        let raw = fs::read_to_string(fixtures_dir().join("handoff_cases.json")).unwrap();
+        let doc: Value = serde_json::from_str(&raw).unwrap();
+        let caller = doc["caller"].as_str().unwrap();
+        for c in doc["cases"].as_array().unwrap() {
+            let payload = c["payload"].as_object().cloned().unwrap_or_default();
+            let frame = Frame::from_parts(c["op"].as_str().unwrap(), payload);
+            let trust = c["trust"].as_str().unwrap();
+            let loopback = c["loopback"].as_bool().unwrap();
+            let expect = c["expect"].as_str().unwrap();
+            let v = check_acl(&frame, caller, trust, loopback);
+            assert_eq!(v.as_str(), expect, "{}", c["name"].as_str().unwrap());
         }
     }
 }

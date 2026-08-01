@@ -229,9 +229,11 @@ pub fn run(local: &Local, opts: ReprotectOpts) -> Result<Map<String, Value>, OpE
 
     local.emit_event(StoreEvent {
         id: uuid::Uuid::new_v4().to_string(),
+        seq: 0,
         ts_ms: now_ms(),
         kind: "reprotect".into(),
         device: local.device_id.clone(),
+        agent_id: None,
         space: Some("backups".into()),
         path: Some(snap_rel.clone()),
         uri: Some(format!(

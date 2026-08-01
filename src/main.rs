@@ -200,7 +200,7 @@ async fn serve(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let (identity, device) = load_identity_device(&args)?;
 
     let store = Arc::new(Local::open(&args.root, &device)?);
-    let event_bus = EventBus::new();
+    let event_bus = EventBus::open(&args.root);
     store.set_event_bus(Arc::clone(&event_bus));
     let token_store = Arc::new(TokenStore::open(&args.root));
     let auth_cfg = nexuspouch::AuthConfig::new(token.clone(), Some(Arc::clone(&token_store)));

@@ -1,6 +1,7 @@
 pub mod browse;
 pub mod cursors;
 pub mod gc;
+pub mod handoff;
 pub mod import;
 pub mod maintenance;
 pub mod manifest;
@@ -19,7 +20,7 @@ use crate::protocol::{self, AclVerdict, Frame};
 use cursors::DeviceCursors;
 use import::ImportAuth;
 use master::MasterPointer;
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -120,6 +121,27 @@ impl Local {
         trust: &str,
         loopback: bool,
     ) -> Result<Map<String, Value>, OpError> {
+        // uri-addressed ops carry space/device inside the uri; enrich the frame
+        // so ACL and dispatch see them.
+        let frame = match frame.op.as_str() {
+            "handoff.ack" | "artifact.state" if frame.space().unwrap_or("").is_empty() => {
+                match frame
+                    .payload
+                    .get("uri")
+                    .and_then(|v| v.as_str())
+                    .and_then(|u| crate::uri::parse(u).ok())
+                {
+                    Some(p) => {
+                        let mut f = frame.clone();
+                        f.payload.insert("space".into(), json!(p.space));
+                        f.payload.insert("device".into(), json!(p.device));
+                        f
+                    }
+                    None => frame,
+                }
+            }
+            _ => frame,
+        };
         let verdict = protocol::check_acl(&frame, caller, trust, loopback);
         if verdict != AclVerdict::Allow {
             let code = acl_code(verdict);
@@ -146,6 +168,9 @@ impl Local {
             "versions.list" => versions::list(self, &frame, caller),
             "versions.read" => versions::read(self, &frame, caller),
             "manifest" => manifest::read(self, &frame, caller),
+            "handoff.create" => handoff::create(self, &frame, caller),
+            "handoff.ack" => handoff::ack(self, &frame, caller),
+            "artifact.state" => handoff::state(self, &frame, caller),
             "write.begin" => write::write_begin(self, &frame, caller),
             "write.chunk" => write::write_chunk(self, &frame),
             "commit" => write::commit(self, &frame, caller),

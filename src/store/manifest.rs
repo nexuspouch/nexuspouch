@@ -25,6 +25,8 @@ pub struct Manifest {
     pub files: Vec<FileEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     #[serde(default)]
     pub state: String,
 }
@@ -113,6 +115,9 @@ pub fn update(
             }
             if let Some(s) = p.get("summary").and_then(|v| v.as_str()) {
                 m.summary = Some(s.to_string());
+            }
+            if let Some(s) = p.get("context").and_then(|v| v.as_str()) {
+                m.context = Some(s.to_string());
             }
             if let Some(s) = p.get("state").and_then(|v| v.as_str()) {
                 m.state = s.to_string();

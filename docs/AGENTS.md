@@ -4,7 +4,7 @@ Nexuspouch 定位为异构 AI agent 之间**本地优先的产物交接与记忆
 拿到一个 `store://` URI，就能读写、校验、追溯产物，且数据默认不出用户自己的硬件。
 
 > 里程碑状态：M0（协议 v4.2 契约）+ M1（MCP 服务器）+ M2（版本化 URI 与血缘）
-> 已落地；M3 交接/事件；M4 agent 身份与配额；M5 检索。能力按里程碑逐步接通，
+> + M3（交接与事件）已落地；M4 agent 身份与配额；M5 检索。能力按里程碑逐步接通，
 > 本文档的「目标形态」一节描述的是已实现能力与后续增量。
 
 ## 1. 当前可用（M0 起）
@@ -60,7 +60,18 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/events/recent"
 | `store_watch` | 事件订阅（M3 接通） |
 | `store_space` | 各块空间占用（空间治理） |
 
-### 2.2 版本与血缘（M2 起可用）
+### 2.2 交接与事件（M3 起可用）
+
+- 状态机：`committed → published → acked`，覆盖旧版本 → `superseded`（可读不可改）；
+  artifacts 空间默认 published，files 空间需 `publish: true`；
+- `handoff.create`：commit + 发布 + `context`（任务描述/验收标准），事件
+  `handoff.created`；`handoff.ack {uri, agent_id}`：消费确认，幂等，事件
+  `handoff.acked`；`artifact.state`：状态 + 血缘（producer / parent_uris / context）；
+- 事件带单调 `seq` 并持久化到 `.system/events.jsonl`；掉线后用
+  `/api/v1/events?since=<seq>` 重放历史再切实时，不丢不重；
+- 以上 op 均可经 `POST /api/v1/store` 帧调用（`handoff.ack` 只需 `{uri, agent_id}`）。
+
+### 2.3 版本与血缘（M2 起可用）
 
 - 引用 `store://.../file@v2` 或 `store://.../file@<sha256[:16]>`（内容寻址），
   缺省为最新版；`?ref=` 等价；
@@ -70,13 +81,13 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/events/recent"
   `"publish": true` 使产物全部版本永久保留（其余按 keep_last 修剪，进回收站）；
 - 版本库 `.versions` 与元数据 `.nexuspouch` 是系统目录，外部 URI 机制上不可寻址。
 
-### 2.3 ShePaw 生态内 agent
+### 2.4 ShePaw 生态内 agent
 
 经 agent-bridge 接入的 ACP agent（Claude Code、Codex 等）由 `acp-proxy-ts`
 直接注入 `store_write` / `store_read` / `store_list` 工具，与 MCP 等价，无需额外配置
 （网关侧注入列为 M1.5 后续项；当前这些 agent 可直接用 §2.1 的 MCP 配置接入）。
 
-### 2.4 接入示例
+### 2.5 接入示例
 
 Claude Code / Codex / Cursor 配置与零依赖 Node 冒烟客户端：
 `agent-bridge/examples/mcp/`（README.md 内有各平台接入命令）。

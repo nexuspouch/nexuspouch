@@ -66,6 +66,7 @@ Base: `/api/v1`
 | GET | `/list?space=&device=&path=` | List without URI |
 | GET | `/versions?uri=` | List versions of a file (`v`, `sha256`, `size`, `mtime`, `protected`) |
 | GET | `/manifest?uri=` | Read task lineage manifest (producer / parent_uris / files / state) |
+| GET | `/artifact/state?uri=` | Artifact state + lineage (`committed/published/acked/superseded`) |
 | POST | `/store` | Store frame API (`{"op","payload"}`) |
 | GET | `/events` | SSE stream (`event: snapshot` then `event: store`) |
 | GET | `/events/recent` | Last N events as JSON |
@@ -99,9 +100,9 @@ curl -s -G -H "Authorization: Bearer $TOKEN" \
 curl -s -H "Authorization: Bearer $TOKEN" \
   "$BASE/api/v1/events/recent" | jq
 
-# SSE (use ?token= for EventSource)
+# SSE (use ?token= for EventSource; ?since=<seq> replays persisted events first)
 curl -N -H "Accept: text/event-stream" \
-  "$BASE/api/v1/events?token=$TOKEN"
+  "$BASE/api/v1/events?token=$TOKEN&since=0"
 
 # Store op (same as POST /store, but works off-loopback with token)
 curl -s -X POST -H "Authorization: Bearer $TOKEN" \

@@ -358,6 +358,14 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
                 }
             }
         }
+        for (space, device, _task, entry) in &manifest_commits {
+            if let (Some(p), Some(sha)) = (
+                entry.get("path").and_then(|v| v.as_str()),
+                entry.get("sha256").and_then(|v| v.as_str()),
+            ) {
+                let _ = super::handoff::on_commit(local, space, device, p, sha, publish);
+            }
+        }
     }
 
     let mut out = Map::new();

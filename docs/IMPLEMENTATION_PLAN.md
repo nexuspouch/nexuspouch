@@ -230,6 +230,11 @@ store://<space>/<device>/<relpath>@<ref>
 
 ## 5. M3：交接与事件语义（8-10 人日）
 
+> 状态：✅ 已落地（本分支）——产物状态机（committed/published/acked/superseded）、
+> `handoff.create` / `handoff.ack` / `artifact.state`（含 @ref 查旧版本状态）、
+> 事件 `seq` 持久化（`.system/events.jsonl`）+ `/events?since=` 重放、
+> handoff ACL fixture（伪造/重复/越权 ack）。
+
 ### 5.1 产物状态机
 
 ```
