@@ -1,7 +1,7 @@
 # ShePaw 存储空间协议规范（store.*）
 
-> 版本：v4.1（与方案 v1.1 对齐：跨端读权威=master；CAS=远端读缓存；GFS 本机执行）
-> 状态：Dart 与 Go 实现的权威定义。上游设计：`docs/storage_space_plan.md`。
+> 版本：v4.2（M0 修订：store URI 规范、op 扩展策略、agent 身份承载。与方案 v1.1 对齐：跨端读权威=master；CAS=远端读缓存；GFS 本机执行）
+> 状态：Dart（ShePaw App）与 Rust（Nexuspouch）实现的权威定义。上游设计：`docs/storage_space_plan.md`。
 > 共享 fixture：`docs/storage_fixtures/`（path 攻击 + ACL 用例）。
 > 传输：复用 `PeerConnection` 控制帧（WS + Noise E2E）与 Channel Tunnel；本协议不新增传输。
 
@@ -14,6 +14,8 @@
 | space | 目录分区：`artifacts` / `files` / `attachments` / `backups`。 |
 | staging | `<device_id>/<space>/.staging/<upload_id>/`，未 commit 的半成品，对 `list`/恢复不可见。 |
 | `.recycle` | 回收站（store 根级系统目录），删除与被覆盖旧版本的去处；仅 master 本机用户可清空。 |
+| `.versions` | 版本库（store 根级系统目录），被覆盖旧版本的不可变存档；仅内部 `versions.*` op 可访问。 |
+| `.nexuspouch` | 任务元数据目录（`<space>/<task>/.nexuspouch/`），manifest / 状态 / ack 记录；仅内部 op 可读。 |
 | trust_level | 配对信任分级（`paired_peers.trust_level`）：`owner`（自己的设备）/ `friend`（预留，本期拒绝一切 store.*）。 |
 
 ## 1. 帧格式
@@ -22,7 +24,7 @@
 {"type": "store", "ns": "store", "op": "<操作>", "v": 1, "req_id": "<uuid>", "...": "op 特有字段"}
 ```
 
-- `type`/`ns` 恒为 `"store"`：peer 层按 `type` 路由控制帧；`ns` 供协议层与 Go 实现校验。
+- `type`/`ns` 恒为 `"store"`：peer 层按 `type` 路由控制帧；`ns` 供协议层与各端实现校验。
 - `req_id`：请求方生成的 uuid。**响应帧**回带同一 `req_id`：
   - 成功：`{"op": "result", "req_id": ..., "data": {...}}`
   - 失败：`{"op": "error", "req_id": ..., "code": "...", "message": "..."}`
@@ -38,13 +40,52 @@
 | `not_paired` | 未配对设备 |
 | `acl_denied` | 越权（见 §3 ACL 矩阵） |
 | `bad_path` | 路径非法（绝对路径/`..` 穿越/非法字符/符号链接逃逸） |
+| `bad_uri` | store URI 非法（scheme/space/device/ref 语法错误） |
+| `ambiguous_ref` | `@ref` 哈希前缀命中多个版本，需更长前缀 |
 | `bad_op` | 未知 op 或 op 参数非法（含伪造的导入授权类 op） |
 | `hash_mismatch` | commit 校验 sha256 不符 |
 | `not_found` | 目标不存在 |
+| `quota_exceeded` | agent 写入超配额或卷空间预算收紧（见 docs/AGENTS.md） |
 | `staging_state` | upload_id 状态非法（重复 commit / 未知 id） |
 | `master_offline` | master 不可达（客户端本地判定） |
 | `not_master` | 本节点已非当前 master（fencing：拒绝 sync 写入/`sync.hello`） |
 | `internal` | 其他内部错误 |
+
+## 1.5 store URI 规范（v4.2 新增；M2 里程碑实现）
+
+### 1.5.1 语法
+
+```
+store://<space>/<device>/<relpath>[@<ref>]
+```
+
+- `space` ∈ `artifacts | files | attachments | backups`（必填单值）。
+- `device` = 16 位小写 hex（Noise 公钥哈希）。
+- `<relpath>` 必须相对路径，符合 §4 规范化（拒绝 `..`、绝对路径、盘符、NUL、反斜杠统一为 `/`）。
+- 兼容路径式写法：`store:///artifacts/<device>/<relpath>`（三段式）与 host 式等价。
+- **点前缀段保留**：`<relpath>` 任何段不得以 `.` 开头（`.staging` / `.recycle` / `.versions` / `.nexuspouch` 等系统目录机制上不可寻址），否则 `bad_path`。
+
+### 1.5.2 版本引用 `<ref>`
+
+引用段可省略（= 当前最新版本，与 v4.1 行为一致）。两种形式，哈希为规范形式：
+
+| 形式 | 示例 | 语义 |
+|------|------|------|
+| 内容寻址 | `.../out.json@3f9a2c…（≥16 hex）` | 按 sha256 前缀解析；前缀冲突 → `ambiguous_ref` |
+| 顺序别名 | `.../out.json@v3` | 按版本索引解析；`v1` = 首次 commit；`v0`/非法 → `bad_uri` |
+| 查询参数等价 | `.../out.json?ref=v2` 或 `?ref=<hash>` | 与 `@` 写法等价（兼容 URL 工具） |
+
+- 版本解析失败（格式非法）→ `bad_uri`；格式合法但不存在 → `not_found`。
+- 版本语义（M2）：commit 使目标不可变；被覆盖旧版本迁入 `.versions` 并保留索引；发布产物（`publish: true`）永久保留，非发布产物按 §8 空间预算（方案）修剪。
+- Agent 纪律：**引用原样传递，不构造、不改写 URI**；`store_read` / `store_write` 单参数调用（方案 §6.3）。
+
+### 1.5.3 版本操作（M2 实现）
+
+| op | 请求 | 响应要点 |
+|----|------|---------|
+| `versions.list` | `{space, device, path}` | `{"versions": [{"v":1,"sha256":"…","size":…,"mtime":…,"producer":…}]}` |
+| `versions.read` | `{space, device, path, ref}` | 同 `read`（`data`/`eof`） |
+| `manifest` | `{space, device, path}` | 任务 `manifest.json`（血缘：producer / parent_uris / files / state） |
 
 ## 2. 操作清单
 
@@ -343,11 +384,22 @@ master 定期（与日快照同节奏）或迁移后：将各 `<device_id>/<spac
 
 ## 12. 版本与兼容
 
-- `v=4`（本文档 store.*）。新增 op 或必填字段 ⇒ `v+1`；只增可选字段不变版本。
+- `v=4`（本文档 store.*，文档修订 v4.2）。
+- **v4.2 扩展策略（M0 定稿）**：新增 op / 新增可选字段**不升版本号**——
+  未知 op 一律 `bad_op`，未知可选字段按 op 语义忽略或报参数错；
+  仅以下破坏性变更才升 `v+1`：
+  - 帧信封（`type`/`ns`/`req_id` 结构）改变；
+  - 既有 op 增加必填字段或改变语义（含错误码含义）；
+  - 加密套件 / prologue / 传输通道改变；
+  - 安全边界收窄（ACL 语义收紧必须双端同步并升版本）。
+- 计划中的 v4.2 增量 op（随里程碑落地，先有 fixture 契约）：`versions.list` / `versions.read` / `manifest`（M2）、`handoff.create` / `handoff.ack` / `artifact.state`（M3）。
 - v3 → v4：新增 `sync.cursors` / `master.pointer` / `master.pointer.query` /
   `master.migrate`。v3 客户端忽略未知 op 通知，互操作不受影响。
-- Go 节点（M7，`storage-node/`）与本规范对齐；攻击 fixture 与 ACL fixture 双端共享
-  （`docs/storage_fixtures/`）。
+- **agent 身份承载（M4 实现，v4.2 定稿边界）**：`store.*` 帧仍以设备身份鉴权，
+  帧内不新增 agent 字段；agent 身份仅承载于 HTTP/MCP 层（Bearer token 绑定
+  `agent_id`，作用域/配额见 `docs/AGENTS.md`），避免破坏 App 与 Noise peer 兼容面。
+- 双端实现（Dart + Rust）与本规范对齐；攻击/ACL/URI/agent fixture 双端共享
+  （`docs/storage_fixtures/`），任一实现修改 fixture 必须双端测试同步全绿。
 
 ## 13. memory.* / she.*（M8，独立控制帧 type）
 

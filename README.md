@@ -108,6 +108,14 @@ ShePaw App integration (pairing, mDNS, reprotect): [docs/INTEGRATION.md](docs/IN
 - `stats.volume_*` and `volume_warn` (Unix `statvfs`; omitted on non-Unix)
 - Mirror reprotect: ShePaw-compatible `manifest.json` + `mirror.tar.enc` (password via admin POST or `NEXUSPOUCH_REPROTECT_PASSWORD`)
 
+## Agent 接入
+
+Nexuspouch 面向 AI agent 协作：agent 拿到 `store://` URI 即可读写、校验、追溯产物（本地优先、数据不出硬件）。
+
+- **现在**：HTTP API + Bearer token（[docs/API.md](docs/API.md)）+ 只读 WebDAV
+- **接入指南**：[docs/AGENTS.md](docs/AGENTS.md)（身份/作用域/配额/引用纪律）
+- **路线**：M1 提供 MCP 服务器 `nexuspouch mcp`，并给 agent-bridge 的 ACP 代理注入 store 工具（[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)）
+
 ## Development
 
 ```bash

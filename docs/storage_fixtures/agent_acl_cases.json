@@ -1,0 +1,152 @@
+{
+  "description": "Shared agent identity ACL fixtures for Dart + Rust (docs/storage_protocol_spec.md §12, docs/AGENTS.md). Layer: HTTP/MCP bearer-token requests carrying agent_id. expect: allow | denyAcl | quota_exceeded | denyUntrusted. Implemented by milestone M4; v4.2 fixes the contract in advance.",
+  "caller_device": "aaaaaaaaaaaaaaaa",
+  "cases": [
+    {
+      "name": "unregistered_agent_write",
+      "agent": "a-0000",
+      "registered": false,
+      "status": "active",
+      "scopes": ["store:write"],
+      "op": "write.begin",
+      "space": "artifacts",
+      "quota": {"max_bytes": 1048576, "bytes_used": 0},
+      "write_size": 1024,
+      "expect": "denyAcl"
+    },
+    {
+      "name": "inactive_agent_read",
+      "agent": "a-0001",
+      "registered": true,
+      "status": "revoked",
+      "scopes": ["store:read"],
+      "op": "read",
+      "space": "artifacts",
+      "expect": "denyAcl"
+    },
+    {
+      "name": "read_scope_write",
+      "agent": "a-0002",
+      "registered": true,
+      "status": "active",
+      "scopes": ["store:read"],
+      "op": "write.begin",
+      "space": "artifacts",
+      "quota": {"max_bytes": 1048576, "bytes_used": 0},
+      "write_size": 1024,
+      "expect": "denyAcl"
+    },
+    {
+      "name": "write_scope_implies_read",
+      "agent": "a-0003",
+      "registered": true,
+      "status": "active",
+      "scopes": ["store:write"],
+      "op": "read",
+      "space": "files",
+      "expect": "allow"
+    },
+    {
+      "name": "space_scoped_write_other_space",
+      "agent": "a-0004",
+      "registered": true,
+      "status": "active",
+      "scopes": ["store:write:artifacts"],
+      "op": "write.begin",
+      "space": "files",
+      "quota": {"max_bytes": 1048576, "bytes_used": 0},
+      "write_size": 1024,
+      "expect": "denyAcl"
+    },
+    {
+      "name": "space_scoped_write_own_space",
+      "agent": "a-0005",
+      "registered": true,
+      "status": "active",
+      "scopes": ["store:write:artifacts"],
+      "op": "write.begin",
+      "space": "artifacts",
+      "quota": {"max_bytes": 1048576, "bytes_used": 0},
+      "write_size": 1024,
+      "expect": "allow"
+    },
+    {
+      "name": "delete_without_scope",
+      "agent": "a-0006",
+      "registered": true,
+      "status": "active",
+      "scopes": ["store:write"],
+      "op": "delete",
+      "space": "artifacts",
+      "expect": "denyAcl"
+    },
+    {
+      "name": "delete_with_scope",
+      "agent": "a-0007",
+      "registered": true,
+      "status": "active",
+      "scopes": ["store:write", "store:delete"],
+      "op": "delete",
+      "space": "files",
+      "expect": "allow"
+    },
+    {
+      "name": "quota_exceeded_write",
+      "agent": "a-0008",
+      "registered": true,
+      "status": "active",
+      "scopes": ["store:write"],
+      "op": "write.begin",
+      "space": "artifacts",
+      "quota": {"max_bytes": 1048576, "bytes_used": 1048500},
+      "write_size": 1024,
+      "expect": "quota_exceeded"
+    },
+    {
+      "name": "quota_ok_write",
+      "agent": "a-0009",
+      "registered": true,
+      "status": "active",
+      "scopes": ["store:write"],
+      "op": "write.begin",
+      "space": "artifacts",
+      "quota": {"max_bytes": 1048576, "bytes_used": 0},
+      "write_size": 1024,
+      "expect": "allow"
+    },
+    {
+      "name": "token_agent_mismatch",
+      "agent": "a-0010",
+      "registered": true,
+      "status": "active",
+      "scopes": ["store:write"],
+      "token_bound_agent": "a-ffff",
+      "op": "write.begin",
+      "space": "artifacts",
+      "quota": {"max_bytes": 1048576, "bytes_used": 0},
+      "write_size": 1024,
+      "expect": "denyAcl"
+    },
+    {
+      "name": "loopback_without_agent",
+      "agent": null,
+      "registered": false,
+      "loopback": true,
+      "op": "stats",
+      "expect": "allow"
+    },
+    {
+      "name": "friend_device_agent",
+      "agent": "a-0011",
+      "registered": true,
+      "status": "active",
+      "scopes": ["store:write"],
+      "device_trust": "friend",
+      "op": "write.begin",
+      "space": "artifacts",
+      "quota": {"max_bytes": 1048576, "bytes_used": 0},
+      "write_size": 1024,
+      "expect": "denyUntrusted"
+    }
+  ]
+}
