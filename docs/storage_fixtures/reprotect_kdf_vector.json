@@ -1,0 +1,22 @@
+{
+  "description": "ShePaw SnapshotCrypto / Nexuspouch snapshot_crypto golden vector",
+  "password": "vector-password",
+  "pbkdf2": {
+    "algorithm": "PBKDF2-HMAC-SHA256",
+    "salt_utf8": "shepaw.storage.v1",
+    "iterations": 120000,
+    "dklen": 32,
+    "hash_hex": "e16e67533b238dd9b81256288ff7acbf3007619dcc6e6facf2279fd163dfe3de"
+  },
+  "key_derive": {
+    "algorithm": "HMAC-SHA256",
+    "key": "password_hash (H)",
+    "message": "UTF-8('shepaw.snapshot.key') || snapshot_salt",
+    "snapshot_salt_hex": "abababababababababababababababababababababababababababababababab",
+    "key_hex": "27471c6533ccb021a64d371ac66c11028977c85cc0a79ee6d6a274ebbd75c0f0"
+  },
+  "aead": {
+    "algorithm": "XChaCha20-Poly1305",
+    "packed": "nonce(24) || ciphertext || tag(16)"
+  }
+}

@@ -15,7 +15,6 @@ use base64::Engine;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -272,7 +271,6 @@ fn build_tar(entries: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
         }
         builder.finish().map_err(|e| e.to_string())?;
     }
-    let _ = buf.flush();
     Ok(buf)
 }
 

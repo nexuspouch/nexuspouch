@@ -5,18 +5,18 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use nexuspouch::{
-    admin::{self, handler::AdminState, auth::is_loopback},
-    TokenStore,
+    admin::{self, auth::is_loopback, handler::AdminState},
     api::{self, ApiState},
     discovery::{self, Discovery},
     events::EventBus,
     noise::Identity,
     peer::{advertise_local_ws, Dialer, PairingHub, PeerServer, PeerStore, SessionRegistry},
     protocol,
-    store::{gc, Local},
+    store::{gc, reprotect, Local},
     webdav::{self, WebDavState},
+    TokenStore,
 };
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -27,34 +27,52 @@ use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
-#[command(name = "nexuspouch")]
+#[command(name = "nexuspouch", about = "Local store master for ShePaw")]
 struct Args {
-    #[arg(long, default_value = "./data")]
+    #[arg(long, global = true, default_value = "./data")]
     root: PathBuf,
 
-    #[arg(long, default_value = ":8787")]
+    #[arg(long, global = true, default_value = ":8787")]
     listen: String,
 
-    #[arg(long, default_value = "nexuspouch")]
+    #[arg(long, global = true, default_value = "nexuspouch")]
     name: String,
 
-    #[arg(long, env = "NEXUSPOUCH_ADMIN_TOKEN")]
+    #[arg(long, global = true, env = "NEXUSPOUCH_ADMIN_TOKEN")]
     admin_token: Option<String>,
 
-    #[arg(long, env = "SHEPAW_ADMIN_TOKEN")]
+    #[arg(long, global = true, env = "SHEPAW_ADMIN_TOKEN")]
     shepaw_admin_token: Option<String>,
 
-    #[arg(long, env = "NEXUSPOUCH_CHANNEL_ENDPOINT")]
+    #[arg(long, global = true, env = "NEXUSPOUCH_CHANNEL_ENDPOINT")]
     channel: Option<String>,
 
-    #[arg(long, env = "SHEPAW_CHANNEL_ENDPOINT")]
+    #[arg(long, global = true, env = "SHEPAW_CHANNEL_ENDPOINT")]
     shepaw_channel: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, global = true)]
     device: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, global = true)]
     no_mdns: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Run connectivity diagnostics (local health / Channel DNS·TCP·WS) and exit
+    Doctor,
+    /// Create a mirror reprotect snapshot under backups/ and exit
+    Reprotect {
+        /// Master password (ShePaw-compatible encrypt). Falls back to NEXUSPOUCH_REPROTECT_PASSWORD.
+        #[arg(long, env = "NEXUSPOUCH_REPROTECT_PASSWORD")]
+        password: Option<String>,
+        /// Plain tree copy instead of encrypt (debug)
+        #[arg(long)]
+        copy: bool,
+    },
 }
 
 #[derive(Deserialize)]
@@ -88,19 +106,7 @@ fn channel_endpoint(args: &Args) -> String {
         .to_string()
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
-
-    let args = Args::parse();
-    let listen = parse_listen(&args.listen);
-    let listen_port = discovery::parse_listen_port(&args.listen);
-    let local_http = format!("http://127.0.0.1:{listen_port}");
-    let token = admin_token(&args);
-    let channel_endpoint = channel_endpoint(&args);
-
+fn load_identity_device(args: &Args) -> Result<(Arc<Identity>, String), Box<dyn std::error::Error>> {
     let id_path = args.root.join(".system").join("noise_identity.json");
     let identity = Arc::new(Identity::load_or_create(&id_path)?);
     let mut device = identity.fingerprint();
@@ -111,6 +117,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         device = want.clone();
     }
+    Ok((identity, device))
+}
+
+fn cmd_doctor(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+    let listen_port = discovery::parse_listen_port(&args.listen);
+    let channel = channel_endpoint(args);
+    let (_, device) = load_identity_device(args)?;
+
+    let local = discovery::diag::check_local_health(listen_port);
+    let channel_check = discovery::diag::check_channel(&channel);
+
+    // Best-effort short browse (no advertise).
+    let discovery = Discovery::start(&args.name, &device, listen_port, false);
+    let lan = discovery::diag::check_lan(
+        discovery.as_ref().map(|d| d.as_ref()),
+        Some(&device),
+    );
+
+    let report = discovery::diag::DiagnosticsReport {
+        local,
+        lan,
+        channel: channel_check,
+        mdns_advertising: false,
+    };
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    // Local may be down if the daemon is not running; only fail hard on Channel.
+    if report.channel.configured && !report.channel.ok {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn cmd_reprotect(args: &Args, password: Option<String>, copy: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let (_, device) = load_identity_device(args)?;
+    let store = Local::open(&args.root, &device)?;
+    let mut opts = reprotect::opts_from_env(password);
+    if copy {
+        opts.mode = reprotect::ReprotectMode::Copy;
+    }
+    let out = reprotect::run(&store, opts)?;
+    println!("{}", serde_json::to_string_pretty(&Value::Object(out))?);
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
+    let args = Args::parse();
+    match &args.command {
+        Some(Command::Doctor) => return cmd_doctor(&args),
+        Some(Command::Reprotect { password, copy }) => {
+            return cmd_reprotect(&args, password.clone(), *copy);
+        }
+        None => {}
+    }
+
+    serve(args).await
+}
+
+async fn serve(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    let listen = parse_listen(&args.listen);
+    let listen_port = discovery::parse_listen_port(&args.listen);
+    let local_http = format!("http://127.0.0.1:{listen_port}");
+    let token = admin_token(&args);
+    let channel_endpoint = channel_endpoint(&args);
+
+    let (identity, device) = load_identity_device(&args)?;
 
     let store = Arc::new(Local::open(&args.root, &device)?);
     let event_bus = EventBus::new();
@@ -275,7 +351,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest("/api/v1", api::router(api_state))
         .nest("/dav", webdav::router(webdav_state));
 
-  if token.is_empty() {
+    if token.is_empty() {
         tracing::info!("admin: no token set — rely on loopback/network policy");
     } else {
         tracing::info!("admin: token required for /admin");

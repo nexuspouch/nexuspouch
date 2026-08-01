@@ -96,4 +96,20 @@ mod tests {
         let enc = encrypt(b"secret", &key_ok).unwrap();
         assert!(decrypt(&enc, &key_bad).is_err());
     }
+
+    /// Cross-language golden vector (see docs/storage_fixtures/reprotect_kdf_vector.json).
+    #[test]
+    fn shepaw_kdf_golden_vector() {
+        let h = hash_password("vector-password");
+        assert_eq!(
+            hex::encode(h),
+            "e16e67533b238dd9b81256288ff7acbf3007619dcc6e6facf2279fd163dfe3de"
+        );
+        let salt = [0xABu8; 32];
+        let key = derive_key_from_hash(&h, &salt);
+        assert_eq!(
+            hex::encode(key),
+            "27471c6533ccb021a64d371ac66c11028977c85cc0a79ee6d6a274ebbd75c0f0"
+        );
+    }
 }

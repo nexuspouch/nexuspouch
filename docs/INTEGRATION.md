@@ -85,9 +85,25 @@ key = HMAC-SHA256(H, "shepaw.snapshot.key" ‖ salt)
 - 手机/桌面保持 owner 配对；master 指针指向 Nexuspouch
 - Channel（可选）仅作穿越 endpoint 配置，节点不托管中继
 
+## Channel 诊断
+
+Nexuspouch **不托管** Channel 中继；`--channel` / `NEXUSPOUCH_CHANNEL_ENDPOINT` 只写入配对 QR 与出站 dial。
+
+```bash
+nexuspouch doctor --channel wss://your-relay/peer
+# 或运行中: GET /admin/api/diagnostics → channel.{dns_ok,tcp_ok,ws_ok}
+```
+
+`ws_ok=true` 且带 HTTP 4xx 说明 TCP/HTTP 栈可达但拒绝匿名握手（对鉴权中继属正常）。
+
+## KDF 跨端向量
+
+见 [`storage_fixtures/reprotect_kdf_vector.json`](storage_fixtures/reprotect_kdf_vector.json)。Rust `store::snapshot_crypto::tests::shepaw_kdf_golden_vector` 锁定该值；App 侧可用同一密码/salt 校验 HMAC。
+
 ## 验收清单
 
 - [ ] `cargo test` / App `flutter test test/storage/nexuspouch_discovery_txt_test.dart`
 - [ ] 扫码配对后 App 能 `store.list` / 写 artifacts
 - [ ] mDNS 改 IP 后，已配对设备 Connect 能刷新 local endpoint
 - [ ] 加密 reprotect：节点生成的 `mirror.tar.enc` 可用同一主密码在 App 侧解密（或反过来）
+- [ ] `nexuspouch doctor` 在配置 Channel 时给出 dns/tcp/ws 分层结果

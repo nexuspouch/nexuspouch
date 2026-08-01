@@ -26,6 +26,16 @@ Install (systemd / Docker): see [docs/INSTALL.md](docs/INSTALL.md).
 cargo run -- --root ./data --listen :8787 --name nexuspouch
 ```
 
+### Subcommands
+
+```bash
+# Connectivity JSON (local / LAN browse / Channel DNS·TCP·WS)
+cargo run -- doctor --listen :8787 --channel wss://relay.example/peer
+
+# One-shot encrypted reprotect (ShePaw-compatible pack)
+cargo run -- reprotect --root ./data --password '…'
+```
+
 ### CLI flags
 
 | Flag | Default | Description |

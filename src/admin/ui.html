@@ -403,9 +403,16 @@ async function runDiagnostics() {
       '发现 ' + (lan.discovered || 0) + ' 个' + (lan.error ? (' · ' + lan.error) : ''));
     const ch = d.channel || {};
     if (ch.configured) {
-      html += statusLine('Channel', !!ch.ok,
-        (ch.latency_ms != null ? ch.latency_ms + ' ms' : '') +
-        (ch.error ? (' · ' + ch.error) : ''));
+      const parts = [];
+      if (ch.host) parts.push(ch.host + (ch.port != null ? (':' + ch.port) : ''));
+      parts.push('dns ' + (ch.dns_ok ? 'ok' : 'fail'));
+      parts.push('tcp ' + (ch.tcp_ok ? 'ok' : 'fail'));
+      parts.push('ws ' + (ch.ws_ok ? 'ok' : 'fail'));
+      if (ch.ws_status) parts.push(ch.ws_status);
+      if (ch.latency_ms != null) parts.push(ch.latency_ms + ' ms');
+      if (ch.error) parts.push(ch.error);
+      html += statusLine('Channel', !!ch.ok, parts.join(' · '));
+      if (ch.note) html += '<div class="muted" style="margin-left:1rem">' + ch.note + '</div>';
     } else {
       html += '<div><strong>Channel</strong> <span class="muted">未配置（跳过）</span></div>';
     }
