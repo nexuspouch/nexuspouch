@@ -1,4 +1,5 @@
-use serde_json::Value;
+use serde_json::{json, Map, Value};
+use std::io::Read;
 
 pub struct Client {
     base: String,
@@ -41,14 +42,14 @@ impl Client {
         }
     }
 
+    pub fn health(&self) -> Result<Value, String> {
+        let url = format!("{}/api/v1/health", self.base);
+        self.get_json(&url)
+    }
+
     pub fn resolve(&self, uri: &str) -> Result<Value, String> {
         let url = self.resolve_url(uri);
-        let resp = ureq::get(&url)
-            .set("Authorization", &format!("Bearer {}", self.token))
-            .call()
-            .map_err(|e| e.to_string())?;
-        let body = resp.into_string().map_err(|e| e.to_string())?;
-        serde_json::from_str(&body).map_err(|e| e.to_string())
+        self.get_json(&url)
     }
 
     pub fn read_text(&self, uri: &str) -> Result<Vec<u8>, String> {
@@ -61,6 +62,111 @@ impl Client {
             .map(|s| s.into_bytes())
             .map_err(|e| e.to_string())
     }
+
+    pub fn read_bytes(&self, uri: &str, offset: i64, length: usize) -> Result<Vec<u8>, String> {
+        let url = format!(
+            "{}/api/v1/read?uri={}&offset={}&length={}",
+            self.base,
+            urlencoding(uri),
+            offset,
+            length
+        );
+        let resp = match ureq::get(&url)
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .call()
+        {
+            Ok(r) => r,
+            Err(ureq::Error::Status(code, resp)) => {
+                return Err(api_status_err(
+                    code,
+                    resp.into_string().unwrap_or_default(),
+                ));
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        let mut buf = Vec::new();
+        resp.into_reader()
+            .read_to_end(&mut buf)
+            .map_err(|e| e.to_string())?;
+        Ok(buf)
+    }
+
+    pub fn list(&self, uri: &str) -> Result<Value, String> {
+        let url = self.list_url(uri);
+        self.get_json(&url)
+    }
+
+    pub fn recent_events(&self, limit: usize) -> Result<Value, String> {
+        let url = format!("{}/api/v1/events/recent?limit={}", self.base, limit);
+        self.get_json(&url)
+    }
+
+    /// POST /api/v1/store frame. Returns the `data` object on success, or
+    /// an Err carrying the store error code + message on `{"op":"error"}`.
+    pub fn store_op(&self, op: &str, payload: Map<String, Value>) -> Result<Value, String> {
+        let url = format!("{}/api/v1/store", self.base);
+        let body = json!({"op": op, "payload": payload});
+        let resp = match ureq::post(&url)
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .set("Content-Type", "application/json")
+            .send_bytes(body.to_string().as_bytes())
+        {
+            Ok(r) => r,
+            Err(ureq::Error::Status(code, resp)) => {
+                return Err(api_status_err(
+                    code,
+                    resp.into_string().unwrap_or_default(),
+                ));
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        let val = parse_json_response(resp)?;
+        if val.get("op").and_then(|v| v.as_str()) == Some("error") {
+            let code = val
+                .get("code")
+                .and_then(|v| v.as_str())
+                .unwrap_or("error");
+            let msg = val
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            return Err(format!("{code}: {msg}"));
+        }
+        Ok(val.get("data").cloned().unwrap_or(Value::Null))
+    }
+
+    fn get_json(&self, url: &str) -> Result<Value, String> {
+        match ureq::get(url)
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .call()
+        {
+            Ok(r) => parse_json_response(r),
+            Err(ureq::Error::Status(code, resp)) => Err(api_status_err(
+                code,
+                resp.into_string().unwrap_or_default(),
+            )),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
+
+fn parse_json_response(resp: ureq::Response) -> Result<Value, String> {
+    let status = resp.status();
+    let body = resp.into_string().unwrap_or_default();
+    if !(200..300).contains(&status) {
+        return Err(api_status_err(status, body));
+    }
+    serde_json::from_str(&body).map_err(|e| format!("bad json: {e}"))
+}
+
+fn api_status_err(code: u16, body: String) -> String {
+    if let Ok(v) = serde_json::from_str::<Value>(&body) {
+        let code = v.get("error").and_then(|c| c.as_str()).unwrap_or("http_error");
+        let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or(&body);
+        return format!("{code}: {msg}");
+    }
+    format!("http_{code}: {body}")
 }
 
 fn urlencoding(s: &str) -> String {

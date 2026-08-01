@@ -112,9 +112,9 @@ ShePaw App integration (pairing, mDNS, reprotect): [docs/INTEGRATION.md](docs/IN
 
 Nexuspouch 面向 AI agent 协作：agent 拿到 `store://` URI 即可读写、校验、追溯产物（本地优先、数据不出硬件）。
 
-- **现在**：HTTP API + Bearer token（[docs/API.md](docs/API.md)）+ 只读 WebDAV
+- **现在**：HTTP API + Bearer token（[docs/API.md](docs/API.md)）+ 只读 WebDAV + MCP 服务器（`nexuspouch mcp`，stdin/stdout）
 - **接入指南**：[docs/AGENTS.md](docs/AGENTS.md)（身份/作用域/配额/引用纪律）
-- **路线**：M1 提供 MCP 服务器 `nexuspouch mcp`，并给 agent-bridge 的 ACP 代理注入 store 工具（[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)）
+- **路线**：M2 版本化 URI 与血缘；M3 交接/事件；M4 agent 身份与配额；M5 检索（[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)）
 
 ## Development
 

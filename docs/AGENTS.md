@@ -3,9 +3,9 @@
 Nexuspouch 定位为异构 AI agent 之间**本地优先的产物交接与记忆总线**：任何 agent
 拿到一个 `store://` URI，就能读写、校验、追溯产物，且数据默认不出用户自己的硬件。
 
-> 里程碑状态：M0（协议 v4.2 契约 + 本文档）。M1 提供 MCP 服务器（`nexuspouch mcp`）；
-> M2 版本化 URI 与血缘；M3 交接/事件；M4 agent 身份与配额；M5 检索。能力按里程碑逐步接通，
-> 本文档描述的目标形态与当前可用面分开标注。
+> 里程碑状态：M0（协议 v4.2 契约）+ M1（MCP 服务器）已落地；M2 版本化 URI 与血缘；
+> M3 交接/事件；M4 agent 身份与配额；M5 检索。能力按里程碑逐步接通，本文档的
+> 「目标形态」一节描述的是已实现能力与后续增量。
 
 ## 1. 当前可用（M0 起）
 
@@ -31,11 +31,12 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/events/recent"
 
 完整端点见 [docs/API.md](API.md)，线协议见 [docs/storage_protocol_spec.md](storage_protocol_spec.md)。
 
-## 2. 目标形态（M1 起）
+## 2. MCP 服务器（M1 起可用）
 
 ### 2.1 MCP 服务器（`nexuspouch mcp`）
 
-任何支持 MCP 的 agent（Claude Code、Codex、Cursor、本地框架）通过配置即接入：
+任何支持 MCP 的 agent（Claude Code、Codex、Cursor、本地框架）通过配置即接入。
+需要节点守护进程先运行（`nexuspouch mcp` 复用本机 `/api/v1`，不另开端口）：
 
 ```json
 {
@@ -48,7 +49,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/events/recent"
 }
 ```
 
-暴露的工具（与 HTTP API 一一对应）：
+暴露的工具（与 HTTP API 一一对应，均可直接调用）：
 
 | 工具 | 作用 |
 |------|------|
@@ -59,10 +60,16 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/events/recent"
 | `store_watch` | 事件订阅（M3 接通） |
 | `store_space` | 各块空间占用（空间治理） |
 
-### 2.2 ShePaw 生态内 agent（M1）
+### 2.2 ShePaw 生态内 agent
 
 经 agent-bridge 接入的 ACP agent（Claude Code、Codex 等）由 `acp-proxy-ts`
-直接注入 `store_write` / `store_read` / `store_list` 工具，与 MCP 等价，无需额外配置。
+直接注入 `store_write` / `store_read` / `store_list` 工具，与 MCP 等价，无需额外配置
+（网关侧注入列为 M1.5 后续项；当前这些 agent 可直接用 §2.1 的 MCP 配置接入）。
+
+### 2.3 接入示例
+
+Claude Code / Codex / Cursor 配置与零依赖 Node 冒烟客户端：
+`agent-bridge/examples/mcp/`（README.md 内有各平台接入命令）。
 
 ## 3. 引用纪律（Agent 侧必须遵守）
 

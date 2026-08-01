@@ -88,6 +88,10 @@
 
 ## 3. M1：MCP 桥（最高杠杆，5-8 人日）
 
+> 状态：✅ 已落地（本分支）——`nexuspouch mcp` stdio 服务器（8 个工具 + 资源）、
+> SDK 扩展、agent-bridge 接入示例（Claude Code / Codex / Cursor / Node 冒烟客户端）、
+> 端到端测试与真实守护进程冒烟验证。
+
 ### 3.1 目标
 
 让任何支持 MCP 的 agent（Claude Code、Codex、Cursor、本地框架）装一个包即可把 Nexuspouch 作为其工件/记忆/交接层。
@@ -137,6 +141,7 @@ nexuspouch mcp --root ./data --token <scoped-token>
 ### 3.6 ShePaw 侧对接（第一步的主战场）
 
 - **agent-bridge ACP 代理集成 store 工具**：`acp-proxy-ts` 增加 `store_write` / `store_read` / `store_list` 三个工具（内部走 Nexuspouch HTTP API 或 MCP），让经 ShePaw 接入的任何 ACP agent（Claude Code、Codex 等）开箱即用；
+- **当前落地形态（M1）**：agent 侧直接挂 `nexuspouch mcp` MCP 配置（`examples/mcp/`）；网关侧原生工具注入列为 M1.5。
 - **ShePaw 桌面端配置示例**：`examples/mcp/` 提供 ShePaw desktop 侧配置；App 内置 Agent 的工具层（`artifact_service`）本期不动，继续用现有 store 帧；
 - **验收**：ShePaw 内一个远程 ACP agent 调用 `store_write` 产出产物 → 手机 App「存储空间」页立即可见（经 master 镜像）。
 

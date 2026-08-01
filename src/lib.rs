@@ -4,6 +4,7 @@ pub mod audit;
 pub mod auth_tokens;
 pub mod discovery;
 pub mod events;
+pub mod mcp;
 pub mod noise;
 pub mod peer;
 pub mod protocol;

@@ -73,6 +73,8 @@ enum Command {
         #[arg(long)]
         copy: bool,
     },
+    /// Serve MCP (Model Context Protocol) over stdio for AI agents
+    Mcp,
 }
 
 #[derive(Deserialize)]
@@ -161,6 +163,14 @@ fn cmd_reprotect(args: &Args, password: Option<String>, copy: bool) -> Result<()
     Ok(())
 }
 
+async fn cmd_mcp(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+    let listen_port = discovery::parse_listen_port(&args.listen);
+    let base = format!("http://127.0.0.1:{listen_port}");
+    let token = admin_token(args);
+    let (_, device) = load_identity_device(args)?;
+    nexuspouch::mcp::run(base, token, device).await
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -173,6 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::Reprotect { password, copy }) => {
             return cmd_reprotect(&args, password.clone(), *copy);
         }
+        Some(Command::Mcp) => return cmd_mcp(&args).await,
         None => {}
     }
 
