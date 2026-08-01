@@ -232,7 +232,7 @@ impl McpServer {
                 },
                 {
                     "name": "store_search",
-                    "description": "Search artifacts/files by keyword. Lands in M5 (returns not_implemented until then).",
+                    "description": "Full-text search over artifacts/files (SQLite FTS5, phrase match). Returns uri/path/size/state/snippet/score.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -448,10 +448,20 @@ impl McpServer {
     }
 
     fn store_search(&self, args: &Value) -> Result<Value, RpcError> {
-        let _ = args;
+        let q = str_arg(args, "q")?;
+        let space = str_arg_opt(args, "space");
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as usize;
+        let out = self
+            .client
+            .search(q, space, None, None, limit)
+            .map_err(map_store_err)?;
         Ok(json!({
-            "not_implemented": true,
-            "message": "store_search lands in M5 (SQLite FTS5 + manifest summaries)",
+            "query": q,
+            "total": out.get("total").cloned().unwrap_or(json!(0)),
+            "results": out.get("results").cloned().unwrap_or(json!([])),
         }))
     }
 

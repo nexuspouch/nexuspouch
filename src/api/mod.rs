@@ -43,6 +43,7 @@ pub fn router(state: Arc<ApiState>) -> Router {
         .route("/versions", get(versions_uri))
         .route("/manifest", get(manifest_uri))
         .route("/artifact/state", get(artifact_state_uri))
+        .route("/search", get(search_uri))
         .route("/store", post(store_op))
         .route("/events", get(events_sse))
         .route("/events/recent", get(events_recent))
@@ -282,6 +283,56 @@ async fn artifact_state_uri(
     ) {
         Ok(data) => Json(json!({"uri": data.get("uri").cloned().unwrap_or(json!(null)), "data": data}))
             .into_response(),
+        Err(e) => op_error(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct SearchQuery {
+    q: String,
+    space: Option<String>,
+    device: Option<String>,
+    state: Option<String>,
+    #[serde(default = "default_search_limit")]
+    limit: usize,
+}
+
+fn default_search_limit() -> usize {
+    50
+}
+
+async fn search_uri(
+    State(state): State<Arc<ApiState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Query(q): Query<SearchQuery>,
+) -> Response {
+    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
+        return unauthorized();
+    }
+    if let Some(resp) = agent_check(
+        &state,
+        &headers,
+        None,
+        "search",
+        q.space.as_deref().unwrap_or(""),
+        0,
+    ) {
+        return resp;
+    }
+    match state.store.search_index(
+        &q.q,
+        q.space.as_deref(),
+        q.device.as_deref(),
+        q.state.as_deref(),
+        q.limit,
+    ) {
+        Ok(results) => Json(json!({
+            "query": q.q,
+            "total": results.len(),
+            "results": results,
+        }))
+        .into_response(),
         Err(e) => op_error(e),
     }
 }
@@ -759,5 +810,37 @@ mod tests {
         let c = crate::sdk::Client::new(&base, "").with_agent(&ro.id);
         let err = c.list("store://artifacts/aaaaaaaaaaaaaaaa/").unwrap_err();
         assert!(err.contains("acl_denied"), "{err}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn search_index_flow() {
+        let (base, _agents) = spawn_api().await;
+        let client = crate::sdk::Client::new(&base, "");
+        commit_text(&client, "artifacts", "t-search/notes.md", "the quick brown fox jumps");
+
+        let out = client
+            .search("fox", Some("artifacts"), None, None, 10)
+            .unwrap();
+        assert_eq!(out["total"], 1, "{out}");
+        assert_eq!(out["results"][0]["path"], "t-search/notes.md");
+        assert!(
+            out["results"][0]["snippet"]
+                .as_str()
+                .unwrap()
+                .contains("fox"),
+            "{out}"
+        );
+
+        // Space filter excludes other spaces.
+        let out = client.search("fox", Some("files"), None, None, 10).unwrap();
+        assert_eq!(out["total"], 0);
+
+        // Delete removes from the index.
+        let mut del = Map::new();
+        del.insert("space".into(), json!("artifacts"));
+        del.insert("path".into(), json!("t-search/notes.md"));
+        client.store_op("delete", del).unwrap();
+        let out = client.search("fox", None, None, None, 10).unwrap();
+        assert_eq!(out["total"], 0, "{out}");
     }
 }

@@ -67,6 +67,7 @@ Base: `/api/v1`
 | GET | `/versions?uri=` | List versions of a file (`v`, `sha256`, `size`, `mtime`, `protected`) |
 | GET | `/manifest?uri=` | Read task lineage manifest (producer / parent_uris / files / state) |
 | GET | `/artifact/state?uri=` | Artifact state + lineage (`committed/published/acked/superseded`) |
+| GET | `/search?q=&space=&device=&state=&limit=` | Full-text search (FTS5; phrase match, snippet + score) |
 | POST | `/store` | Store frame API (`{"op","payload"}`) |
 | GET | `/events` | SSE stream (`event: snapshot` then `event: store`) |
 | GET | `/events/recent` | Last N events as JSON |

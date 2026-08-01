@@ -345,6 +345,10 @@ draft ──commit──> committed ──publish──> published ──ack─�
 
 ## 7. M5：索引 / 检索 / 摘要（8-10 人日）
 
+> 状态：✅ 已落地（本分支）——SQLite FTS5 索引（commit/delete 自动维护 +
+> `index rebuild` CLI / admin）、`/api/v1/search`、`store_search` MCP 接通、
+> 可选摘要 hook（`NEXUSPOUCH_SUMMARY_URL` / `_CMD`，异步写入 manifest）。
+
 ### 7.1 索引
 
 - 依赖：`rusqlite`（bundled SQLite）新建 `<root>/.system/index.db`，启用 FTS5。

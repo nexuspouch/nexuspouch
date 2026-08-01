@@ -2,6 +2,7 @@ pub mod browse;
 pub mod cursors;
 pub mod gc;
 pub mod handoff;
+pub mod index;
 pub mod import;
 pub mod maintenance;
 pub mod manifest;
@@ -77,6 +78,7 @@ pub struct Local {
     peer_rpc: Mutex<Option<Arc<dyn PeerRpc>>>,
     peer_ensure: Mutex<Option<Arc<dyn PeerEnsure>>>,
     event_bus: Mutex<Option<Arc<EventBus>>>,
+    index: index::SearchIndex,
     audit: AuditLog,
 }
 
@@ -102,6 +104,7 @@ impl Local {
             peer_rpc: Mutex::new(None),
             peer_ensure: Mutex::new(None),
             event_bus: Mutex::new(None),
+            index: index::SearchIndex::open(&root),
             audit: AuditLog::open(&root),
         };
         let ptr_path = local.pointer_path();
@@ -306,6 +309,33 @@ impl Local {
         if let Some(bus) = self.event_bus.lock().unwrap().as_ref() {
             bus.publish(event);
         }
+    }
+
+    pub fn index_file(&self, e: &index::IndexEntry) {
+        self.index.index_file(e);
+    }
+
+    pub fn remove_index(&self, uri: &str) {
+        self.index.remove(uri);
+    }
+
+    pub fn search_index(
+        &self,
+        q: &str,
+        space: Option<&str>,
+        device: Option<&str>,
+        state: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<serde_json::Value>, OpError> {
+        self.index
+            .search(q, space, device, state, limit)
+            .map_err(|e| OpError::new("internal", e))
+    }
+
+    pub fn rebuild_index(&self) -> Result<usize, OpError> {
+        self.index
+            .rebuild(self)
+            .map_err(|e| OpError::new("internal", e))
     }
 
     pub(crate) fn peer_rpc(&self) -> Option<Arc<dyn PeerRpc>> {

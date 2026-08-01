@@ -3,7 +3,8 @@
 Nexuspouch 定位为异构 AI agent 之间**本地优先的产物交接与记忆总线**：任何 agent
 拿到一个 `store://` URI，就能读写、校验、追溯产物，且数据默认不出用户自己的硬件。
 
-> 里程碑状态：M0-M3 + M4（agent 身份、作用域与配额）已落地；M5 检索。
+> 里程碑状态：M0-M5 全部落地（协议契约 / MCP / 版本化与血缘 / 交接与事件 /
+> agent 身份与配额 / 检索与摘要）。
 > 能力按里程碑逐步接通，
 > 本文档的「目标形态」一节描述的是已实现能力与后续增量。
 
@@ -56,9 +57,21 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/events/recent"
 | `store_write` | 写文件，返回 `store://` URI |
 | `store_read` / `store_read_chunk` | 读文件 / 分块读 |
 | `store_meta` / `store_list` | 元数据 / 列目录 |
-| `store_search` | 检索（M5 接通） |
+| `store_search` | 全文检索（SQLite FTS5，短语匹配） |
 | `store_watch` | 事件订阅（M3 接通） |
 | `store_space` | 各块空间占用（空间治理） |
+
+### 2.5 检索与摘要（M5 起可用）
+
+- `store_search {q, space?, limit?}`：全文检索 artifacts/files（路径、正文、
+  manifest 摘要；正文抽取限 md/txt/json/log 且 ≤1MB），返回
+  uri/path/size/state/snippet/score；
+- HTTP：`GET /api/v1/search?q=&space=&state=&limit=`（agent 需 `store:read`）；
+- 索引随 commit/delete 自动维护；重建：`nexuspouch index rebuild` 或
+  `POST /admin/api/index/rebuild`；
+- 可选摘要：设置 `NEXUSPOUCH_SUMMARY_URL`（OpenAI 兼容）+ `_TOKEN`，或
+  `NEXUSPOUCH_SUMMARY_CMD`，commit 后异步生成一行摘要写入 manifest 并进入索引；
+  未配置时全链路不受影响。
 
 ### 2.2 交接与事件（M3 起可用）
 
@@ -81,13 +94,13 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/events/recent"
   `"publish": true` 使产物全部版本永久保留（其余按 keep_last 修剪，进回收站）；
 - 版本库 `.versions` 与元数据 `.nexuspouch` 是系统目录，外部 URI 机制上不可寻址。
 
-### 2.4 ShePaw 生态内 agent
+### 2.6 ShePaw 生态内 agent
 
 经 agent-bridge 接入的 ACP agent（Claude Code、Codex 等）由 `acp-proxy-ts`
 直接注入 `store_write` / `store_read` / `store_list` 工具，与 MCP 等价，无需额外配置
 （网关侧注入列为 M1.5 后续项；当前这些 agent 可直接用 §2.1 的 MCP 配置接入）。
 
-### 2.5 接入示例
+### 2.7 接入示例
 
 Claude Code / Codex / Cursor 配置与零依赖 Node 冒烟客户端：
 `agent-bridge/examples/mcp/`（README.md 内有各平台接入命令）。

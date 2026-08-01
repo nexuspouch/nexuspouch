@@ -322,6 +322,14 @@ pub fn agents_reset_quota(state: &AdminState, id: String) -> Result<Map<String, 
     Ok(Map::from_iter([("ok".into(), json!(ok)), ("id".into(), json!(id))]))
 }
 
+pub fn index_rebuild(state: &AdminState) -> Result<Map<String, Value>, OpError> {
+    let indexed = state.store.rebuild_index()?;
+    Ok(Map::from_iter([
+        ("indexed".into(), json!(indexed)),
+        ("ok".into(), json!(true)),
+    ]))
+}
+
 pub fn tokens_revoke(state: &AdminState, id: String) -> Result<Map<String, Value>, OpError> {
     let store = state
         .auth

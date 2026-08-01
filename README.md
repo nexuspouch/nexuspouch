@@ -107,6 +107,7 @@ ShePaw App integration (pairing, mDNS, reprotect): [docs/INTEGRATION.md](docs/IN
 - `commit.retention` policies (`keep_last`, `gfs`) after successful promote
 - `stats.volume_*` and `volume_warn` (Unix `statvfs`; omitted on non-Unix)
 - Mirror reprotect: ShePaw-compatible `manifest.json` + `mirror.tar.enc` (password via admin POST or `NEXUSPOUCH_REPROTECT_PASSWORD`)
+- Full-text search (`/api/v1/search`, SQLite FTS5) with auto-indexing and optional summary hook
 
 ## Agent 接入
 

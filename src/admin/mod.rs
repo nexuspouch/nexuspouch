@@ -46,6 +46,7 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/agents", post(agents_create))
         .route("/agents/revoke", post(agents_revoke))
         .route("/agents/reset-quota", post(agents_reset))
+        .route("/index/rebuild", post(index_rebuild))
         .route("/reprotect", post(reprotect))
         .with_state(state.clone());
 
@@ -370,6 +371,10 @@ async fn agents_reset(
     Json(body): Json<AgentIdBody>,
 ) -> Response {
     auth_json(state, headers, None, move |s| handler::agents_reset_quota(s, body.id)).await
+}
+
+async fn index_rebuild(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    auth_json(state, headers, None, handler::index_rebuild).await
 }
 
 #[derive(Deserialize, Default)]

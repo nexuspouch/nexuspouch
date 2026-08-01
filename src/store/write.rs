@@ -364,6 +364,14 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
                 entry.get("sha256").and_then(|v| v.as_str()),
             ) {
                 let _ = super::handoff::on_commit(local, space, device, p, sha, publish);
+                if let Some(size) = entry.get("size").and_then(|v| v.as_i64()) {
+                    if let Some(ie) = super::index::index_entry_from_commit(
+                        local, space, device, p, sha, size, publish,
+                    ) {
+                        local.index_file(&ie);
+                    }
+                    super::index::maybe_summarize(local, space, device, p);
+                }
             }
         }
     }

@@ -113,6 +113,28 @@ impl Client {
         self.get_json(&url)
     }
 
+    pub fn search(
+        &self,
+        q: &str,
+        space: Option<&str>,
+        device: Option<&str>,
+        state: Option<&str>,
+        limit: usize,
+    ) -> Result<Value, String> {
+        let mut url = format!("{}/api/v1/search?q={}", self.base, urlencoding(q));
+        if let Some(s) = space {
+            url.push_str(&format!("&space={}", urlencoding(s)));
+        }
+        if let Some(d) = device {
+            url.push_str(&format!("&device={}", urlencoding(d)));
+        }
+        if let Some(st) = state {
+            url.push_str(&format!("&state={}", urlencoding(st)));
+        }
+        url.push_str(&format!("&limit={}", limit.max(1)));
+        self.get_json(&url)
+    }
+
     /// POST /api/v1/store frame. Returns the `data` object on success, or
     /// an Err carrying the store error code + message on `{"op":"error"}`.
     pub fn store_op(&self, op: &str, payload: Map<String, Value>) -> Result<Value, String> {

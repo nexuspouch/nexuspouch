@@ -115,11 +115,13 @@ pub fn delete(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
     match move_to_recycle(local, &device, space, &norm) {
         Ok(recycled) => {
             out.insert("recycled".into(), json!(recycled));
+            local.remove_index(&format!("store://{space}/{device}/{norm}"));
             emit_delete_event(local, space, &device, &norm);
         }
         Err(e) if e.code == "not_found" => {
             out.insert("recycled".into(), json!(""));
             out.insert("already_gone".into(), json!(true));
+            local.remove_index(&format!("store://{space}/{device}/{norm}"));
             emit_delete_event(local, space, &device, &norm);
         }
         Err(e) => return Err(e),

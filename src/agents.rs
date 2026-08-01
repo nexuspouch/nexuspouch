@@ -226,6 +226,7 @@ fn scope_allows(scopes: &[String], op: &str, space: &str) -> bool {
             | "versions.read"
             | "manifest"
             | "artifact.state"
+            | "search"
             | "stats"
     );
     if read {

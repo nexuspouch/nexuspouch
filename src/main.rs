@@ -80,6 +80,8 @@ enum Command {
         #[arg(long)]
         agent: String,
     },
+    /// Rebuild the SQLite FTS5 search index from the store tree
+    IndexRebuild,
 }
 
 #[derive(Deserialize)]
@@ -176,6 +178,14 @@ async fn cmd_mcp(args: &Args, agent: Option<String>) -> Result<(), Box<dyn std::
     nexuspouch::mcp::run(base, token, device, agent).await
 }
 
+fn cmd_index_rebuild(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+    let (_, device) = load_identity_device(args)?;
+    let store = Local::open(&args.root, &device)?;
+    let indexed = store.rebuild_index()?;
+    println!("indexed {indexed} files");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -190,6 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Mcp) => return cmd_mcp(&args, None).await,
         Some(Command::McpAgent { agent }) => return cmd_mcp(&args, Some(agent.clone())).await,
+        Some(Command::IndexRebuild) => return cmd_index_rebuild(&args),
         None => {}
     }
 
