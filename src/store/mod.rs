@@ -3,11 +3,13 @@ pub mod cursors;
 pub mod gc;
 pub mod import;
 pub mod maintenance;
+pub mod manifest;
 pub mod master;
 pub mod migrate_seed;
 pub mod reprotect;
 pub mod retention;
 pub mod snapshot_crypto;
+pub mod versions;
 pub mod volume;
 pub mod write;
 
@@ -141,6 +143,9 @@ impl Local {
             "list" => browse::list(self, &frame, caller),
             "meta" => browse::meta(self, &frame, caller),
             "read" => browse::read(self, &frame, caller),
+            "versions.list" => versions::list(self, &frame, caller),
+            "versions.read" => versions::read(self, &frame, caller),
+            "manifest" => manifest::read(self, &frame, caller),
             "write.begin" => write::write_begin(self, &frame, caller),
             "write.chunk" => write::write_chunk(self, &frame),
             "commit" => write::commit(self, &frame, caller),

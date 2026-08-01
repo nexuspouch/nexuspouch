@@ -2,7 +2,7 @@ use crate::admin::auth::{self, AuthConfig};
 use crate::events::{EventBus, StoreEvent};
 use crate::protocol::{self, Frame};
 use crate::store::{Local, OpError, MAX_CHUNK};
-use crate::uri::{self, StoreUri};
+use crate::uri::{self, RefKind, StoreUri};
 use axum::{
     body::Body,
     extract::{ConnectInfo, Query, State},
@@ -38,6 +38,8 @@ pub fn router(state: Arc<ApiState>) -> Router {
         .route("/uri/resolve", get(uri_resolve))
         .route("/read", get(read_uri))
         .route("/list", get(list_uri))
+        .route("/versions", get(versions_uri))
+        .route("/manifest", get(manifest_uri))
         .route("/store", post(store_op))
         .route("/events", get(events_sse))
         .route("/events/recent", get(events_recent))
@@ -106,18 +108,110 @@ async fn uri_resolve(
         Ok(u) => u,
         Err(e) => return op_error(e),
     };
+    let meta = match &parsed.ref_kind {
+        RefKind::Latest => match state.store.handle(
+            parsed.to_frame_meta(),
+            &state.device,
+            protocol::TRUST_OWNER,
+            true,
+        ) {
+            Ok(m) => m,
+            Err(e) => return op_error(e),
+        },
+        _ => match crate::store::versions::meta(
+            &state.store,
+            &parsed.space,
+            &parsed.device,
+            &parsed.path,
+            &parsed.ref_kind,
+        ) {
+            Ok(m) => m,
+            Err(e) => return op_error(e),
+        },
+    };
+    Json(json!({
+        "uri": parsed.format_with_ref(),
+        "space": parsed.space,
+        "device": parsed.device,
+        "path": parsed.path,
+        "meta": meta,
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct VersionsQuery {
+    uri: String,
+}
+
+async fn versions_uri(
+    State(state): State<Arc<ApiState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Query(q): Query<VersionsQuery>,
+) -> Response {
+    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
+        return unauthorized();
+    }
+    let parsed = match uri::parse(&q.uri) {
+        Ok(u) => u,
+        Err(e) => return op_error(e),
+    };
+    if parsed.path.is_empty() {
+        return op_error(OpError::new("bad_path", "versions require a file path"));
+    }
+    let mut payload = Map::new();
+    payload.insert("space".into(), json!(parsed.space));
+    payload.insert("device".into(), json!(parsed.device));
+    payload.insert("path".into(), json!(parsed.path));
     match state.store.handle(
-        parsed.to_frame_meta(),
+        Frame::from_parts("versions.list", payload),
         &state.device,
         protocol::TRUST_OWNER,
         true,
     ) {
-        Ok(meta) => Json(json!({
+        Ok(data) => Json(json!({
             "uri": parsed.format(),
             "space": parsed.space,
             "device": parsed.device,
             "path": parsed.path,
-            "meta": meta,
+            "protected": data.get("protected").cloned().unwrap_or(json!(false)),
+            "versions": data.get("versions").cloned().unwrap_or(json!([])),
+        }))
+        .into_response(),
+        Err(e) => op_error(e),
+    }
+}
+
+async fn manifest_uri(
+    State(state): State<Arc<ApiState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Query(q): Query<VersionsQuery>,
+) -> Response {
+    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
+        return unauthorized();
+    }
+    let parsed = match uri::parse(&q.uri) {
+        Ok(u) => u,
+        Err(e) => return op_error(e),
+    };
+    let mut payload = Map::new();
+    payload.insert("space".into(), json!(parsed.space));
+    payload.insert("device".into(), json!(parsed.device));
+    payload.insert("path".into(), json!(parsed.path));
+    match state.store.handle(
+        Frame::from_parts("manifest", payload),
+        &state.device,
+        protocol::TRUST_OWNER,
+        true,
+    ) {
+        Ok(data) => Json(json!({
+            "uri": parsed.format(),
+            "space": data.get("space").cloned().unwrap_or(json!(parsed.space)),
+            "device": data.get("device").cloned().unwrap_or(json!(parsed.device)),
+            "task": data.get("task").cloned().unwrap_or(json!(null)),
+            "manifest": data.get("manifest").cloned().unwrap_or(json!(null)),
         }))
         .into_response(),
         Err(e) => op_error(e),
@@ -158,10 +252,19 @@ async fn read_uri(
     } else {
         q.length
     };
-    let full = match state
-        .store
-        .resolve(&parsed.space, &parsed.device, &parsed.path)
-    {
+    let full = match &parsed.ref_kind {
+        RefKind::Latest => state
+            .store
+            .resolve(&parsed.space, &parsed.device, &parsed.path),
+        _ => crate::store::versions::resolve(
+            &state.store,
+            &parsed.space,
+            &parsed.device,
+            &parsed.path,
+            &parsed.ref_kind,
+        ),
+    };
+    let full = match full {
         Ok(p) => p,
         Err(e) => return op_error(e),
     };
@@ -221,6 +324,7 @@ async fn list_uri(
             space,
             device,
             path,
+            ref_kind: RefKind::Latest,
         }
     };
     match state.store.handle(
@@ -354,4 +458,104 @@ async fn events_recent(
         events = events.split_off(skip);
     }
     Json(json!({"events": events})).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::EventBus;
+    use axum::Router;
+    use base64::Engine as _;
+    use sha2::Digest;
+    use std::sync::Arc;
+
+    const DEV: &str = "aaaaaaaaaaaaaaaa";
+
+    async fn spawn_api() -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Local::open(dir.path(), DEV).unwrap());
+        let events = EventBus::new();
+        store.set_event_bus(Arc::clone(&events));
+        let auth = crate::AuthConfig::new("", None);
+        let state = Arc::new(ApiState {
+            store,
+            auth,
+            device: DEV.to_string(),
+            events,
+            mdns: false,
+        });
+        let app = Router::new().nest("/api/v1", router(state));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    fn commit_text(client: &crate::sdk::Client, space: &str, rel: &str, content: &str) {
+        use sha2::{Digest, Sha256};
+        let sha = hex::encode(Sha256::digest(content.as_bytes()));
+        let mut begin = Map::new();
+        begin.insert("space".into(), json!(space));
+        begin.insert("path".into(), json!(rel));
+        begin.insert("size".into(), json!(content.len() as i64));
+        begin.insert("sha256".into(), json!(sha));
+        let out = client.store_op("write.begin", begin).unwrap();
+        let upload_id = out["upload_id"].as_str().unwrap().to_string();
+        let mut chunk = Map::new();
+        chunk.insert("upload_id".into(), json!(upload_id));
+        chunk.insert("offset".into(), json!(0));
+        chunk.insert("data".into(), json!(
+            base64::engine::general_purpose::STANDARD.encode(content.as_bytes())
+        ));
+        client.store_op("write.chunk", chunk).unwrap();
+        let mut commit = Map::new();
+        commit.insert("space".into(), json!(space));
+        commit.insert("upload_ids".into(), json!([upload_id]));
+        client.store_op("commit", commit).unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn versions_api_flow() {
+        let base = spawn_api().await;
+        let client = crate::sdk::Client::new(&base, "");
+        let uri = format!("store://artifacts/{DEV}/t-9/out.txt");
+
+        commit_text(&client, "artifacts", "t-9/out.txt", "first");
+        commit_text(&client, "artifacts", "t-9/out.txt", "second");
+
+        // /api/v1/versions lists both commits.
+        let url = format!(
+            "{base}/api/v1/versions?uri={}",
+            url::form_urlencoded::byte_serialize(uri.as_bytes()).collect::<String>()
+        );
+        let versions = ureq::get(&url).call().unwrap().into_string().unwrap();
+        let versions: Value = serde_json::from_str(&versions).unwrap();
+        let arr = versions["versions"].as_array().unwrap();
+        assert_eq!(arr.len(), 2, "{versions}");
+
+        // /api/v1/read with @v1 returns the old content.
+        let old = client
+            .read_bytes(&format!("{uri}@v1"), 0, 64)
+            .expect("read @v1");
+        assert_eq!(String::from_utf8(old).unwrap(), "first");
+
+        // /api/v1/uri/resolve with a hash ref reports the versioned meta.
+        let sha1 = hex::encode(sha2::Sha256::digest(b"first"));
+        let meta = client
+            .resolve(&format!("{uri}@{}", &sha1[..16]))
+            .unwrap();
+        assert_eq!(meta["meta"]["size"], 5, "{meta}");
+        assert_eq!(meta["meta"]["sha256"].as_str().unwrap(), sha1);
+
+        // Unknown version -> not_found.
+        let err = client.read_bytes(&format!("{uri}@v99"), 0, 64).unwrap_err();
+        assert!(err.contains("not_found"), "{err}");
+    }
 }

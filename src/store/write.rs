@@ -240,9 +240,16 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
 
     let retention_device = batch.first().map(|p| p.u.device.clone());
     let retention_space = batch.first().map(|p| p.u.space.clone());
+    let manifest_payload = frame.payload.get("manifest").cloned();
+    let publish = frame.payload_bool("publish");
+    let producer = manifest_payload
+        .as_ref()
+        .and_then(|m| m.get("producer"));
 
     let mut committed = Vec::new();
     let mut failed = Vec::new();
+    // (space, device, task_root, committed_entry) for manifest updates.
+    let mut manifest_commits: Vec<(String, String, String, Value)> = Vec::new();
     for p in batch {
         let dest = local
             .root
@@ -260,10 +267,22 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
             failed.push(json!({"upload_id": p.id, "error": e.msg}));
             continue;
         }
+        let mut version: u64 = 1;
         if dest.exists() {
-            if let Err(e) = super::browse::move_to_recycle(local, &p.u.device, &p.u.space, &p.u.path) {
-                failed.push(json!({"upload_id": p.id, "error": e.to_string()}));
-                continue;
+            match super::versions::archive_old(
+                local,
+                &p.u.space,
+                &p.u.device,
+                &p.u.path,
+                &p.sum,
+                producer,
+            ) {
+                Ok(Some(archived_v)) => version = archived_v + 1,
+                Ok(None) => {}
+                Err(e) => {
+                    failed.push(json!({"upload_id": p.id, "error": e.to_string()}));
+                    continue;
+                }
             }
         }
         if let Err(e) = fs::rename(&p.u.tmp, &dest) {
@@ -272,16 +291,22 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
         }
         let _ = fs::remove_file(&p.u.meta_path);
         local.forget_upload(&p.id);
-        committed.push(json!({
+        let entry = json!({
             "upload_id": p.id,
             "path": p.u.path,
             "size": p.size,
             "sha256": p.sum,
-        }));
+            "version": version,
+        });
+        if let Some(task) = super::manifest::task_root(&p.u.path) {
+            manifest_commits.push((p.u.space.clone(), p.u.device.clone(), task, entry.clone()));
+        }
+        committed.push(entry);
         let uri = crate::uri::StoreUri {
             space: p.u.space.clone(),
             device: p.u.device.clone(),
             path: p.u.path.clone(),
+            ref_kind: crate::uri::RefKind::Latest,
         };
         local.emit_event(
             crate::events::StoreEvent::new("commit", &p.u.device)
@@ -291,6 +316,8 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
                     ("size".into(), json!(p.size)),
                     ("sha256".into(), json!(p.sum)),
                     ("upload_id".into(), json!(p.id)),
+                    ("version".into(), json!(version)),
+                    ("publish".into(), json!(publish)),
                 ])),
         );
     }
@@ -299,6 +326,36 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
         if let (Some(device), Some(space)) = (retention_device, retention_space) {
             if let Some(retention) = frame.payload.get("retention") {
                 super::retention::apply_retention(local, &device, &space, retention);
+            }
+        }
+        // Task manifests (lineage) + publish protection.
+        let mut seen: Vec<(String, String, String)> = Vec::new();
+        for (space, device, task, _entry) in &manifest_commits {
+            let key = (space.clone(), device.clone(), task.clone());
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key.clone());
+            let files: Vec<Value> = manifest_commits
+                .iter()
+                .filter(|(s, d, t, _)| s == space && d == device && t == task)
+                .map(|(_, _, _, e)| e.clone())
+                .collect();
+            let _ = super::manifest::update(
+                local,
+                device,
+                space,
+                task,
+                &files,
+                manifest_payload.as_ref(),
+                publish,
+            );
+            if publish {
+                for (_, _, _, e) in &manifest_commits {
+                    if let Some(p) = e.get("path").and_then(|v| v.as_str()) {
+                        let _ = super::versions::mark_protected(local, space, device, p);
+                    }
+                }
             }
         }
     }

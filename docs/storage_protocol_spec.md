@@ -13,7 +13,7 @@
 | master | 镜像汇聚点 + 跨端读取权威。同一时间唯一；M2 默认本机（loopback），指定/迁移见方案 §6.5（M6）。 |
 | space | 目录分区：`artifacts` / `files` / `attachments` / `backups`。 |
 | staging | `<device_id>/<space>/.staging/<upload_id>/`，未 commit 的半成品，对 `list`/恢复不可见。 |
-| `.recycle` | 回收站（store 根级系统目录），删除与被覆盖旧版本的去处；仅 master 本机用户可清空。 |
+| `.recycle` | 回收站（store 根级系统目录），删除与被覆盖旧版本的最终去处（覆盖先经 `.versions` 再修剪，见 §2.6/§1.5）；仅 master 本机用户可清空。 |
 | `.versions` | 版本库（store 根级系统目录），被覆盖旧版本的不可变存档；仅内部 `versions.*` op 可访问。 |
 | `.nexuspouch` | 任务元数据目录（`<space>/<task>/.nexuspouch/`），manifest / 状态 / ack 记录；仅内部 op 可读。 |
 | trust_level | 配对信任分级（`paired_peers.trust_level`）：`owner`（自己的设备）/ `friend`（预留，本期拒绝一切 store.*）。 |
@@ -151,7 +151,11 @@ store://<space>/<device>/<relpath>[@<ref>]
 ```
 
 - 校验：每个 upload 的组装内容 sha256 与 write.begin 声明一致，**全部通过才进入转正**。
-- 转正：暂存文件 rename 到最终路径（同卷原子）；目标已存在时旧版本先移入 `.recycle`。
+- 转正：暂存文件 rename 到最终路径（同卷原子）；目标已存在时旧版本先迁入 `.versions`
+  并保留版本索引（§1.5.3；M2 起覆盖不再直接进 `.recycle`），非发布产物按
+  `keep_last` 预算修剪，修剪与 `delete` 才进 `.recycle`。`commit` 可选携带
+  `"manifest"`（producer / parent_uris / summary / state）与 `"publish": true`
+  （发布产物全部版本永久保留）。
 - 批内单文件转正失败：其余继续，响应 `failed` 标注；staging 保留可重试。
 - `retention`（可选）：转正成功后按策略剪枝同分区**顶层目录**。
   - `{"policy":"keep_last","keep":4,"include_prefix"?: "...","exclude_prefix"?: "..."}`

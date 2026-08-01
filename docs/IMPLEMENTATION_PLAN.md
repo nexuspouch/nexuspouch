@@ -147,6 +147,11 @@ nexuspouch mcp --root ./data --token <scoped-token>
 
 ## 4. M2：内容寻址与版本化 URI（语义内核，10-14 人日）
 
+> 状态：✅ 已落地（本分支）——URI `@ref`/`?ref=` 解析、`.versions` 版本库
+> （keep_last 默认 10、publish 永久保留、修剪进回收站）、任务 manifest 血缘、
+> `versions.list/read` 与 `manifest` op、HTTP `/versions` `/manifest`、
+> read/resolve 支持版本引用、fixture 驱动测试（含 URL 归一化穿越修复）。
+
 ### 4.1 URI 规范（先行定稿）
 
 ```

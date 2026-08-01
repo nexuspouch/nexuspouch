@@ -144,7 +144,7 @@ pub fn check_acl(frame: &Frame, caller_device_id: &str, trust_level: &str, loopb
             }
             AclVerdict::Allow
         }
-        "list" | "meta" | "read" => {
+        "list" | "meta" | "read" | "versions.list" | "versions.read" | "manifest" => {
             if space.is_empty() || !is_valid_space(space) {
                 return AclVerdict::DenyBadOp;
             }

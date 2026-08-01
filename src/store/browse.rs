@@ -136,6 +136,7 @@ fn emit_delete_event(local: &Local, space: &str, device: &str, path: &str) {
         space: space.to_string(),
         device: device.to_string(),
         path: path.to_string(),
+        ref_kind: crate::uri::RefKind::Latest,
     };
     local.emit_event(
         crate::events::StoreEvent::new("delete", device)

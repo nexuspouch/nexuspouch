@@ -23,6 +23,30 @@ Examples:
 
 Path-style also accepted: `store:///artifacts/aaaaaaaaaaaaaaaa/task-41/output.png`
 
+## Version refs
+
+`store://<space>/<device>/<path>@<ref>` — omit for latest; `@<sha256[:16+]>`
+content addressing or `@v<N>` sequential alias (v1 = first commit). `?ref=`
+query form is equivalent. Reads and `/uri/resolve` accept refs; unknown refs
+return `not_found`, ambiguous hash prefixes return `ambiguous_ref`.
+
+```bash
+# Read version 2 of a file
+curl -s -G -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode "uri=store://files/aaaaaaaaaaaaaaaa/docs/a.md@v2" \
+  "$BASE/api/v1/read"
+
+# List versions
+curl -s -G -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode "uri=store://artifacts/aaaaaaaaaaaaaaaa/task-1/out.txt" \
+  "$BASE/api/v1/versions"
+
+# Task manifest (lineage)
+curl -s -G -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode "uri=store://artifacts/aaaaaaaaaaaaaaaa/task-1/" \
+  "$BASE/api/v1/manifest"
+```
+
 ## Authentication
 
 - Header: `Authorization: Bearer <token>` (same token as `--admin-token` / `NEXUSPOUCH_ADMIN_TOKEN`)
@@ -40,6 +64,8 @@ Base: `/api/v1`
 | GET | `/read?uri=&offset=&length=` | Read file bytes (octet-stream) |
 | GET | `/list?uri=` | List directory entries |
 | GET | `/list?space=&device=&path=` | List without URI |
+| GET | `/versions?uri=` | List versions of a file (`v`, `sha256`, `size`, `mtime`, `protected`) |
+| GET | `/manifest?uri=` | Read task lineage manifest (producer / parent_uris / files / state) |
 | POST | `/store` | Store frame API (`{"op","payload"}`) |
 | GET | `/events` | SSE stream (`event: snapshot` then `event: store`) |
 | GET | `/events/recent` | Last N events as JSON |
