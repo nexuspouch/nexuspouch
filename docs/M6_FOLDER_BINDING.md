@@ -1,6 +1,8 @@
 # M6 设计：本地目录绑定与摄取（Folder Binding）
 
 > 状态：设计稿 v0.1（2026-08-01）
+> 实现状态：M6a（App 目录绑定服务）+ M6b（节点 `--bind`）核心已落地
+> （2026-08-02），reflink/hardlink 摄取与事件驱动 watcher 为后续增强。
 > 关联：[storage_space_plan.md](storage_space_plan.md)（设备目录模型）、
 > [storage_protocol_spec.md](storage_protocol_spec.md) §2（写路径收敛）、
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)（M0-M5 已落地）
@@ -134,6 +136,10 @@
 
 ## 9. Phase A：桌面 App 侧绑定（先行）
 
+> 状态：✅ 核心已落地——`shepaw/lib/storage/folder_binding_service.dart`
+> （绑定注册表 + sha256 对账摄取 + 删除进回收站 + 忽略规则 + 轮询周期同步），
+> 测试全绿；UI 目录选择器为后续项。
+
 - Dart：`watcher` 监听用户所选目录 → 复用 `LocalStore` + `SyncJournal` + `SyncEngine`
   摄取（先 copy，后续同卷可升级 reflink）；
 - UI：设置 → 存储空间 → 「绑定目录」：选目录、映射 space/folder、忽略规则；
@@ -142,6 +148,10 @@
   忽略规则生效。
 
 ## 10. Phase B：Nexuspouch 节点侧 --bind（常开）
+
+> 状态：✅ 核心已落地——`nexuspouch --bind <external>=<space>/<folder>[:mode]`
+> + `.system/bindings.json` 注册表 + `bindings sync` 命令 + 60s 周期同步
+> （loopback 写路径摄取，版本/索引钩子自动触发）；reflink/hardlink 为后续增强。
 
 - 配置：`nexuspouch --bind <external>=files/<folder>[:mode]` 或 `bindings.json`；
 - 实现：`notify` + `notify-debouncer-full`，loopback 写路径 + reflink 摄取；

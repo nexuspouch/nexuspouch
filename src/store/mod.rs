@@ -1,4 +1,5 @@
 pub mod browse;
+pub mod bindings;
 pub mod cursors;
 pub mod gc;
 pub mod handoff;

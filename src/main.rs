@@ -56,6 +56,11 @@ struct Args {
     #[arg(long, global = true)]
     no_mdns: bool,
 
+    /// Bind an external directory into the store (repeatable):
+    /// `<external>=<space>/<folder>[:mode]` (mode: auto|copy|hardlink-immutable)
+    #[arg(long = "bind")]
+    binds: Vec<String>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -82,6 +87,8 @@ enum Command {
     },
     /// Rebuild the SQLite FTS5 search index from the store tree
     IndexRebuild,
+    /// Sync all configured directory bindings once and print reports
+    BindingsSync,
 }
 
 #[derive(Deserialize)]
@@ -186,6 +193,42 @@ fn cmd_index_rebuild(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn cmd_bindings_sync(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+    let (_, device) = load_identity_device(args)?;
+    let store = Local::open(&args.root, &device)?;
+    let reports = nexuspouch::store::bindings::sync_all(&store);
+    if reports.is_empty() {
+        println!("no bindings configured");
+    }
+    for r in &reports {
+        println!("{}", serde_json::to_string_pretty(&r.to_json())?);
+    }
+    Ok(())
+}
+
+fn parse_bind(spec: &str) -> Result<(String, String, String, String), String> {
+    let (external, rest) = spec
+        .split_once('=')
+        .ok_or("--bind expects <external>=<space>/<folder>[:mode]")?;
+    let mut parts: Vec<&str> = rest.split('/').collect();
+    if parts.is_empty() || parts[0].is_empty() {
+        return Err("--bind folder required".into());
+    }
+    let mut mode = "auto".to_string();
+    if let Some(last) = parts.last_mut() {
+        if let Some((folder, m)) = last.split_once(':') {
+            *last = folder;
+            mode = m.to_string();
+        }
+    }
+    let (space, folder) = if parts.len() >= 2 {
+        (parts[0].to_string(), parts[1..].join("/"))
+    } else {
+        ("files".to_string(), parts[0].to_string())
+    };
+    Ok((external.to_string(), space, folder, mode))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -201,6 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::Mcp) => return cmd_mcp(&args, None).await,
         Some(Command::McpAgent { agent }) => return cmd_mcp(&args, Some(agent.clone())).await,
         Some(Command::IndexRebuild) => return cmd_index_rebuild(&args),
+        Some(Command::BindingsSync) => return cmd_bindings_sync(&args),
         None => {}
     }
 
@@ -231,6 +275,30 @@ async fn serve(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         if b > 0 {
             tracing::info!("gc recycle: purged {b} bytes");
         }
+    }
+    let bindings_registry = nexuspouch::store::bindings::BindingsRegistry::open(&args.root);
+    for spec in &args.binds {
+        match parse_bind(spec) {
+            Ok((external, space, folder, mode)) => {
+                let host = std::env::var("HOSTNAME").unwrap_or_else(|_| "node".into());
+                match bindings_registry.add(
+                    &format!("{folder}@{host}"),
+                    &external,
+                    &space,
+                    &folder,
+                    &mode,
+                    vec![],
+                ) {
+                    Ok(b) => tracing::info!("bind {} -> {}/{}", b.external, b.space, b.folder),
+                    Err(e) => tracing::warn!("bind {spec}: {e}"),
+                }
+            }
+            Err(e) => tracing::warn!("bind {spec}: {e}"),
+        }
+    }
+    if !bindings_registry.is_empty() {
+        tracing::info!("bindings: periodic sync every 60s");
+        nexuspouch::store::bindings::start_periodic(Arc::clone(&store), Duration::from_secs(60));
     }
     store.start_periodic_gc(Duration::from_secs(3600));
 
