@@ -319,8 +319,21 @@ async fn tokens_revoke(
     auth_json(state, headers, None, move |s| handler::tokens_revoke(s, body.id)).await
 }
 
-async fn reprotect(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
-    auth_json(state, headers, None, |s| handler::reprotect_run(s)).await
+#[derive(Deserialize, Default)]
+struct ReprotectBody {
+    password: Option<String>,
+}
+
+async fn reprotect(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    body: Result<Json<ReprotectBody>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let password = body.ok().and_then(|b| b.0.password);
+    auth_json(state, headers, None, move |s| {
+        handler::reprotect_run(s, password)
+    })
+    .await
 }
 
 async fn auth_json<F>(

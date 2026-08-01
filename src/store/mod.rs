@@ -7,6 +7,7 @@ pub mod master;
 pub mod migrate_seed;
 pub mod reprotect;
 pub mod retention;
+pub mod snapshot_crypto;
 pub mod volume;
 pub mod write;
 

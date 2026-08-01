@@ -282,11 +282,12 @@ pub fn tokens_revoke(state: &AdminState, id: String) -> Result<Map<String, Value
     ]))
 }
 
-pub fn reprotect_run(state: &AdminState) -> Result<Map<String, Value>, OpError> {
-    let copy = std::env::var("NEXUSPOUCH_REPROTECT_COPY")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-    let out = crate::store::reprotect::run(&state.store, copy)?;
+pub fn reprotect_run(
+    state: &AdminState,
+    password: Option<String>,
+) -> Result<Map<String, Value>, OpError> {
+    let opts = crate::store::reprotect::opts_from_env(password);
+    let out = crate::store::reprotect::run(&state.store, opts)?;
     state
         .store
         .audit_action("reprotect", &state.device, "reprotect.run", "admin reprotect");

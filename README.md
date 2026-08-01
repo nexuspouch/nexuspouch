@@ -89,11 +89,14 @@ When `--admin-token` is unset, `/api/v1` and `/dav` accept loopback clients only
 
 See [docs/storage_protocol_spec.md](docs/storage_protocol_spec.md) and shared fixtures in [docs/storage_fixtures/](docs/storage_fixtures/).
 
+ShePaw App integration (pairing, mDNS, reprotect): [docs/INTEGRATION.md](docs/INTEGRATION.md).
+
 ## Implemented
 
 - `master.migrate` with online seed from previous master, mirror hash gate, and outbound dial via `Dialer`
 - `commit.retention` policies (`keep_last`, `gfs`) after successful promote
 - `stats.volume_*` and `volume_warn` (Unix `statvfs`; omitted on non-Unix)
+- Mirror reprotect: ShePaw-compatible `manifest.json` + `mirror.tar.enc` (password via admin POST or `NEXUSPOUCH_REPROTECT_PASSWORD`)
 
 ## Development
 

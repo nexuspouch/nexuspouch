@@ -491,9 +491,20 @@ $('createToken').onclick = async () => {
   } catch (e) { $('msg').textContent = String(e.message||e); }
 };
 $('runReprotect').onclick = async () => {
-  if (!confirm('对本机 master 镜像树生成 reprotect 清单快照？')) return;
+  const password = prompt(
+    '再保护密码（与 ShePaw 主密码一致可生成 mirror.tar.enc；留空则仅写清单）',
+    ''
+  );
+  if (password === null) return;
+  if (!confirm(password
+    ? '生成加密再保护包（manifest.json + mirror.tar.enc）？'
+    : '生成清单快照（无密文）？')) return;
   try {
-    const out = await api('/admin/api/reprotect', {method:'POST'});
+    const out = await api('/admin/api/reprotect', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(password ? {password} : {}),
+    });
     alert('reprotect ok: ' + JSON.stringify(out));
     refresh();
   } catch (e) { $('msg').textContent = String(e.message||e); }
