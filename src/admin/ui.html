@@ -17,6 +17,7 @@ button { cursor: pointer; }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 pre { white-space: pre-wrap; word-break: break-word; font-size: .85rem; }
 .err { color: #c62828; }
+.ok { color: #2e7d32; }
 .warn {
   display: none; margin: 0 0 1rem; padding: .75rem 1rem; border-radius: 8px;
   background: color-mix(in srgb, #f9a825 22%, Canvas); border: 1px solid #f9a825;
@@ -45,6 +46,19 @@ td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid
     <div id="pairPending"></div>
     <h2 style="margin-top:1rem">已配对设备</h2>
     <div id="peers"></div>
+  </div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2>连通性 / 发现</h2>
+      <div class="row">
+        <button id="runDiag">诊断</button>
+        <button id="refreshDiscovery">刷新发现</button>
+      </div>
+    </div>
+    <div id="diagStatus" class="muted" style="margin-bottom:.5rem">点击「诊断」检查本机 / 局域网 / Channel 连通性。</div>
+    <div id="diagDetails"></div>
+    <h2 style="margin-top:1rem;font-size:.95rem">mDNS 发现</h2>
+    <div id="mdnsPeers" class="muted">点击「刷新发现」浏览局域网节点。</div>
   </div>
   <div class="card">
     <h2>用量 stats</h2>
@@ -343,6 +357,70 @@ async function refresh() {
     $('msg').textContent = String(e.message||e);
   }
 }
+function statusLine(label, ok, detail) {
+  const cls = ok ? 'ok' : 'err';
+  const mark = ok ? '✓' : '✗';
+  return '<div><strong>' + label + '</strong> <span class="' + cls + '">' + mark + '</span>' +
+    (detail ? ' <span class="muted">' + detail + '</span>' : '') + '</div>';
+}
+async function runDiagnostics() {
+  $('msg').textContent = '';
+  $('diagStatus').textContent = '诊断中…';
+  try {
+    const d = await api('/admin/api/diagnostics');
+    let html = '';
+    const local = d.local || {};
+    html += statusLine('本机', !!local.ok,
+      (local.latency_ms != null ? local.latency_ms + ' ms' : '') +
+      (local.error ? (' · ' + local.error) : ''));
+    const lan = d.lan || {};
+    html += statusLine('局域网', !!lan.ok,
+      '发现 ' + (lan.discovered || 0) + ' 个' + (lan.error ? (' · ' + lan.error) : ''));
+    const ch = d.channel || {};
+    if (ch.configured) {
+      html += statusLine('Channel', !!ch.ok,
+        (ch.latency_ms != null ? ch.latency_ms + ' ms' : '') +
+        (ch.error ? (' · ' + ch.error) : ''));
+    } else {
+      html += '<div><strong>Channel</strong> <span class="muted">未配置（跳过）</span></div>';
+    }
+    html += '<div class="muted" style="margin-top:.35rem">mDNS 广播: ' +
+      (d.mdns_advertising ? '<span class="ok">是</span>' : '<span class="err">否</span>') + '</div>';
+    $('diagDetails').innerHTML = html;
+    $('diagStatus').textContent = '';
+    if (lan.peers && lan.peers.length) renderMdnsPeers(lan.peers);
+  } catch (e) {
+    $('diagStatus').textContent = '';
+    $('msg').textContent = String(e.message||e);
+  }
+}
+function renderMdnsPeers(peers) {
+  if (!peers || !peers.length) {
+    $('mdnsPeers').innerHTML = '<p class="muted">未发现局域网节点</p>';
+    return;
+  }
+  let html = '<table><thead><tr><th>名称</th><th>fp</th><th>endpoint</th></tr></thead><tbody>';
+  for (const p of peers) {
+    html += '<tr><td>' + (p.name||'') + (p.same_host ? ' <span class="muted">(本机)</span>' : '') +
+      '</td><td>' + shortId(p.fingerprint) +
+      '</td><td style="word-break:break-all;font-size:.85rem">' + (p.endpoint||'') + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  $('mdnsPeers').innerHTML = html;
+}
+async function refreshDiscovery() {
+  $('msg').textContent = '';
+  $('mdnsPeers').textContent = '浏览中…';
+  try {
+    const out = await api('/admin/api/discovery');
+    renderMdnsPeers(out.peers || []);
+  } catch (e) {
+    $('mdnsPeers').textContent = '';
+    $('msg').textContent = String(e.message||e);
+  }
+}
+$('runDiag').onclick = runDiagnostics;
+$('refreshDiscovery').onclick = refreshDiscovery;
 $('refresh').onclick = refresh;
 $('pairStart').onclick = async () => {
   try {

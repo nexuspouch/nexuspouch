@@ -8,6 +8,7 @@ use axum::{
 use clap::Parser;
 use nexuspouch::{
     admin::{self, handler::AdminState, auth::is_loopback},
+    discovery::{self, Discovery},
     noise::Identity,
     peer::{advertise_local_ws, Dialer, PairingHub, PeerServer, PeerStore, SessionRegistry},
     protocol,
@@ -47,6 +48,9 @@ struct Args {
 
     #[arg(long)]
     device: Option<String>,
+
+    #[arg(long)]
+    no_mdns: bool,
 }
 
 #[derive(Deserialize)]
@@ -88,6 +92,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = Args::parse();
     let listen = parse_listen(&args.listen);
+    let listen_port = discovery::parse_listen_port(&args.listen);
+    let local_http = format!("http://127.0.0.1:{listen_port}");
     let token = admin_token(&args);
     let channel_endpoint = channel_endpoint(&args);
 
@@ -147,6 +153,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         channel_endpoint: channel_endpoint.clone(),
     });
 
+    let listener = tokio::net::TcpListener::bind(&listen).await?;
+
+    let mdns_discovery = if args.no_mdns {
+        Discovery::start(&args.name, &device, listen_port, false)
+    } else {
+        Discovery::start(&args.name, &device, listen_port, true)
+    };
+    if let Some(ref d) = mdns_discovery {
+        if d.is_advertising() {
+            tracing::info!(
+                "mdns: advertising {} on port {listen_port}",
+                discovery::SERVICE_TYPE
+            );
+        }
+    }
+    let mdns_advertising = mdns_discovery
+        .as_ref()
+        .is_some_and(|d| d.is_advertising());
+
     let admin_state = Arc::new(AdminState {
         store: Arc::clone(&store),
         auth: nexuspouch::AuthConfig {
@@ -159,6 +184,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         identity: Some(Arc::clone(&identity)),
         listen: args.listen.clone(),
         channel_endpoint: channel_endpoint.clone(),
+        discovery: mdns_discovery,
+        local_http,
+        listen_port,
     });
 
     let device_log = device.clone();
@@ -171,6 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/health",
             get(move || {
                 let device = device.clone();
+                let mdns = mdns_advertising;
                 async move {
                     Json(json!({
                         "ok": true,
@@ -178,6 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "protocol": protocol::PROTOCOL_VERSION,
                         "noise": true,
                         "fingerprint": device,
+                        "mdns": mdns,
                     }))
                 }
             }),
@@ -239,7 +269,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.root.display()
     );
 
-    let listener = tokio::net::TcpListener::bind(&listen).await?;
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),

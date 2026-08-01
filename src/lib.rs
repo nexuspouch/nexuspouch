@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod discovery;
 pub mod noise;
 pub mod peer;
 pub mod protocol;

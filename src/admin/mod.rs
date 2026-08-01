@@ -36,6 +36,8 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/browse/delete", post(browse_delete))
         .route("/devices/purge", post(device_purge))
         .route("/devices/wipe-self", post(device_wipe_self))
+        .route("/discovery", get(discovery))
+        .route("/diagnostics", get(diagnostics))
         .with_state(state.clone());
 
     Router::new()
@@ -245,6 +247,21 @@ async fn device_wipe_self(
     Json(body): Json<DeviceWipeBody>,
 ) -> Response {
     auth_json(state, headers, None, |s| handler::device_wipe_self(s, &body.confirm)).await
+}
+
+async fn discovery(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    auth_json(state, headers, None, |s| handler::discovery_browse(s)).await
+}
+
+async fn diagnostics(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    if !state.auth.authorize_headers(&headers, None) {
+        return unauthorized();
+    }
+    let state = state.clone();
+    let report = tokio::task::spawn_blocking(move || handler::diagnostics(&state))
+        .await
+        .unwrap_or_default();
+    Json(Value::Object(report)).into_response()
 }
 
 async fn auth_json<F>(

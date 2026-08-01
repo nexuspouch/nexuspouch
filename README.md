@@ -34,8 +34,29 @@ cargo run -- --root ./data --listen :8787 --name nexuspouch
 | `--admin-token` | env | Admin API/UI token (`NEXUSPOUCH_ADMIN_TOKEN` or `SHEPAW_ADMIN_TOKEN`) |
 | `--channel` | env | Channel WS endpoint for QR (`NEXUSPOUCH_CHANNEL_ENDPOINT` or `SHEPAW_CHANNEL_ENDPOINT`) |
 | `--device` | Noise fp | Override device_id (must match Noise fingerprint) |
+| `--no-mdns` | off | Skip mDNS service registration (browse still works) |
 
 When `--admin-token` is unset, `/admin` and `/admin/api/*` accept requests without a Bearer token (use only on trusted networks).
+
+## mDNS & diagnostics
+
+LAN discovery uses DNS-SD service type **`_nexuspouch._tcp.local.`** with TXT records:
+
+| Key | Value |
+|-----|-------|
+| `fp` | Noise device fingerprint |
+| `name` | Device display name |
+| `path` | `/peer/ws` |
+| `proto` | Protocol version (`4`) |
+
+Admin API (Bearer token required when configured):
+
+| Path | Description |
+|------|-------------|
+| `GET /admin/api/discovery` | Browse LAN peers via mDNS (~1.5s) |
+| `GET /admin/api/diagnostics` | Local health, LAN browse, channel TCP reachability |
+
+`GET /health` includes `"mdns": true/false` when the node is advertising.
 
 ## HTTP endpoints
 

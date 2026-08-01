@@ -14,6 +14,9 @@ pub struct AdminState {
     pub identity: Option<Arc<crate::noise::Identity>>,
     pub listen: String,
     pub channel_endpoint: String,
+    pub discovery: Option<Arc<crate::discovery::Discovery>>,
+    pub local_http: String,
+    pub listen_port: u16,
 }
 
 pub fn stats(state: &AdminState) -> Result<Map<String, Value>, OpError> {
@@ -267,4 +270,30 @@ pub fn device_wipe_self(state: &AdminState, confirm: &str) -> Result<Map<String,
         ("device_id".into(), json!(state.device)),
         ("freed_bytes".into(), json!(freed)),
     ]))
+}
+
+pub fn discovery_browse(state: &AdminState) -> Result<Map<String, Value>, OpError> {
+    let discovery = state
+        .discovery
+        .as_ref()
+        .ok_or_else(|| OpError::new("internal", "mDNS unavailable"))?;
+    let peers = discovery.browse(
+        std::time::Duration::from_millis(1500),
+        Some(&state.device),
+    );
+    let count = peers.len();
+    Ok(Map::from_iter([
+        ("peers".into(), json!(peers)),
+        ("count".into(), json!(count)),
+    ]))
+}
+
+pub fn diagnostics(state: &AdminState) -> Map<String, Value> {
+    let report = crate::discovery::diag::run_diagnostics(
+        &state.listen,
+        &state.channel_endpoint,
+        state.discovery.as_ref(),
+        &state.device,
+    );
+    report.to_map()
 }
