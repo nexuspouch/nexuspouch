@@ -114,6 +114,10 @@
 
 ### Step 2（小改动）
 
+> 状态：✅ 已落地（本分支）——`space.declare` / `space.list`（store 帧 + admin
+> `/spaces` + UI 卡片）、`check_acl_with` 属性驱动 ACL、自定义空间端到端可用、
+> reprotect 迁入 `.system/reprotect/`（含旧位置自动搬迁）、space profile fixture。
+
 - admin `space.declare`（声明 name + 属性，校验命名与保留前缀）；
 - reprotect 迁入 `.system/reprotect/`（含旧位置兼容读取或迁移提示）；
 - fixture 增加 space profile 用例（属性 × ACL 期望）。

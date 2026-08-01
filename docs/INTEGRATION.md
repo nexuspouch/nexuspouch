@@ -52,10 +52,13 @@ Agent / 脚本读产物优先走 HTTP API；移动 App 与信任链仍走 `/peer
 与 ShePaw `MirrorReprotectService` 对齐：
 
 ```
-<master>/backups/reprotect-YYYYMMDD-HHMMSS/
+.system/reprotect/YYYYMMDD-HHMMSS/
   manifest.json      # kind=mirror_reprotect
   mirror.tar.enc     # XChaCha20-Poly1305(nonce‖ct‖tag)
 ```
+
+> v4.3 起从 `<master>/backups/reprotect-*` 迁入 `.system/reprotect/`（系统区，
+> 不再与用户 backups 争命名空间）；旧位置包在下次再保护时自动搬迁。
 
 KDF：
 

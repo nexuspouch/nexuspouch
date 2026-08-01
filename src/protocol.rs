@@ -110,17 +110,40 @@ pub fn normalize_path(raw: &str) -> Result<String, String> {
     Ok(out.join("/"))
 }
 
-/// Mirrors Dart `checkStoreAcl`.
+/// Built-in space visibility: `Some(shared?)`.
+pub fn builtin_visibility(space: &str) -> Option<bool> {
+    match space {
+        "artifacts" | "files" => Some(true),
+        "attachments" | "backups" => Some(false),
+        _ => None,
+    }
+}
+
+/// Mirrors Dart `checkStoreAcl` for the four built-in spaces.
 pub fn check_acl(frame: &Frame, caller_device_id: &str, trust_level: &str, loopback: bool) -> AclVerdict {
+    check_acl_with(frame, caller_device_id, trust_level, loopback, &builtin_visibility)
+}
+
+/// Attribute-driven ACL (Step 2): `vis(space)` returns `Some(shared?)` for
+/// known spaces (built-in or declared), `None` for unknown.
+pub fn check_acl_with(
+    frame: &Frame,
+    caller_device_id: &str,
+    trust_level: &str,
+    loopback: bool,
+    vis: &dyn Fn(&str) -> Option<bool>,
+) -> AclVerdict {
     if trust_level != TRUST_OWNER {
         return AclVerdict::DenyUntrusted;
     }
     let space = frame.space().unwrap_or("");
     let device = frame.device().unwrap_or("");
+    let known = |sp: &str| is_valid_space(sp) || vis(sp).is_some();
+    let shared = |sp: &str| vis(sp) == Some(true);
 
     match frame.op.as_str() {
         "write.begin" | "write.chunk" | "commit" | "handoff.create" => {
-            if !space.is_empty() && !is_valid_space(space) {
+            if !space.is_empty() && !known(space) {
                 return AclVerdict::DenyBadOp;
             }
             if frame.op == "write.begin" && space.is_empty() {
@@ -132,11 +155,11 @@ pub fn check_acl(frame: &Frame, caller_device_id: &str, trust_level: &str, loopb
             AclVerdict::Allow
         }
         "delete" | "handoff.ack" => {
-            if space.is_empty() || !is_valid_space(space) {
+            if space.is_empty() || !known(space) {
                 return AclVerdict::DenyBadOp;
             }
             let target_own = device.is_empty() || device == caller_device_id;
-            if !target_own && !shared_readable(space) {
+            if !target_own && !shared(space) {
                 return AclVerdict::DenyAcl;
             }
             if !device.is_empty() && !is_valid_device_id(device) {
@@ -146,11 +169,11 @@ pub fn check_acl(frame: &Frame, caller_device_id: &str, trust_level: &str, loopb
         }
         "list" | "meta" | "read" | "versions.list" | "versions.read" | "manifest"
         | "artifact.state" => {
-            if space.is_empty() || !is_valid_space(space) {
+            if space.is_empty() || !known(space) {
                 return AclVerdict::DenyBadOp;
             }
             let target_own = device.is_empty() || device == caller_device_id;
-            if !target_own && !shared_readable(space) {
+            if !target_own && !shared(space) {
                 if frame.payload_bool("seed") {
                     if !device.is_empty() && !is_valid_device_id(device) {
                         return AclVerdict::DenyBadOp;
@@ -190,7 +213,14 @@ pub fn check_acl(frame: &Frame, caller_device_id: &str, trust_level: &str, loopb
                 AclVerdict::DenyAcl
             }
         }
-        "stats" => AclVerdict::Allow,
+        "stats" | "space.list" => AclVerdict::Allow,
+        "space.declare" => {
+            if loopback {
+                AclVerdict::Allow
+            } else {
+                AclVerdict::DenyAcl
+            }
+        }
         "sync.hello" => {
             let d = frame.payload.get("device").and_then(|v| v.as_str()).unwrap_or("");
             if !is_valid_device_id(d) || d != caller_device_id {
@@ -341,6 +371,29 @@ mod tests {
             let loopback = c["loopback"].as_bool().unwrap();
             let expect = c["expect"].as_str().unwrap();
             let v = check_acl(&frame, caller, trust, loopback);
+            assert_eq!(v.as_str(), expect, "{}", c["name"].as_str().unwrap());
+        }
+    }
+
+    #[test]
+    fn space_profile_fixture() {
+        let raw = fs::read_to_string(fixtures_dir().join("space_profile_cases.json")).unwrap();
+        let doc: Value = serde_json::from_str(&raw).unwrap();
+        let caller = doc["caller"].as_str().unwrap();
+        let known = doc["known"].as_object().unwrap().clone();
+        let vis = move |sp: &str| {
+            known
+                .get(sp)
+                .and_then(|v| v.as_str())
+                .map(|s| s == "shared")
+        };
+        for c in doc["cases"].as_array().unwrap() {
+            let payload = c["payload"].as_object().cloned().unwrap_or_default();
+            let frame = Frame::from_parts(c["op"].as_str().unwrap(), payload);
+            let trust = c["trust"].as_str().unwrap();
+            let loopback = c["loopback"].as_bool().unwrap();
+            let expect = c["expect"].as_str().unwrap();
+            let v = check_acl_with(&frame, caller, trust, loopback, &vis);
             assert_eq!(v.as_str(), expect, "{}", c["name"].as_str().unwrap());
         }
     }

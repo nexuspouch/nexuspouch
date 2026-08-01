@@ -1,21 +1,21 @@
 //! Mirror-tree reprotect — ShePaw-compatible encrypted pack.
 //!
-//! Layout under `<master>/backups/reprotect-YYYYMMDD-HHMMSS/`:
+//! Layout under `<store>/.system/reprotect/YYYYMMDD-HHMMSS/`:
 //! - `manifest.json` (`kind: mirror_reprotect`)
 //! - `mirror.tar.enc` (XChaCha20-Poly1305 of ustar)
 //!
 //! Without a password: writes integrity `manifest` only (mode=`manifest`).
+//! Legacy packs under `<device>/backups/reprotect-*` are relocated on run.
 
 use super::snapshot_crypto;
 use super::{io_err, Local, OpError};
 use crate::events::StoreEvent;
 use crate::store::browse::file_sha;
-use crate::store::retention;
 use base64::Engine;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,17 +60,15 @@ pub fn opts_from_env(password: Option<String>) -> ReprotectOpts {
     ReprotectOpts { mode, password }
 }
 
-/// Build a reprotect snapshot under backups/.
+/// Build a reprotect snapshot under `.system/reprotect/`.
 pub fn run(local: &Local, opts: ReprotectOpts) -> Result<Map<String, Value>, OpError> {
     local.require_master()?;
+    let system_dir = local.root.join(".system").join("reprotect");
+    fs::create_dir_all(&system_dir).map_err(io_err)?;
+    relocate_legacy(local, &system_dir);
     let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
     let id = format!("reprotect-{ts}");
-    let snap_rel = id.clone();
-    let snap_dir = local
-        .root
-        .join(&local.device_id)
-        .join("backups")
-        .join(&snap_rel);
+    let snap_dir = system_dir.join(&id);
     fs::create_dir_all(&snap_dir).map_err(io_err)?;
 
     let mut files_meta = Vec::new();
@@ -216,16 +214,7 @@ pub fn run(local: &Local, opts: ReprotectOpts) -> Result<Map<String, Value>, OpE
     )
     .map_err(io_err)?;
 
-    let mut retention_map = Map::new();
-    retention_map.insert("policy".into(), json!("keep_last"));
-    retention_map.insert("keep".into(), json!(4));
-    retention_map.insert("include_prefix".into(), json!("reprotect-"));
-    retention::apply_retention(
-        local,
-        &local.device_id,
-        "backups",
-        &Value::Object(retention_map),
-    );
+    prune_reprotect(local, &system_dir);
 
     local.emit_event(StoreEvent {
         id: uuid::Uuid::new_v4().to_string(),
@@ -234,12 +223,9 @@ pub fn run(local: &Local, opts: ReprotectOpts) -> Result<Map<String, Value>, OpE
         kind: "reprotect".into(),
         device: local.device_id.clone(),
         agent_id: None,
-        space: Some("backups".into()),
-        path: Some(snap_rel.clone()),
-        uri: Some(format!(
-            "store://backups/{}/{}",
-            local.device_id, snap_rel
-        )),
+        space: None,
+        path: Some(format!(".system/reprotect/{id}")),
+        uri: None,
         detail: Map::from_iter([
             ("id".into(), json!(id)),
             ("mode".into(), json!(mode_str)),
@@ -253,8 +239,69 @@ pub fn run(local: &Local, opts: ReprotectOpts) -> Result<Map<String, Value>, OpE
         ("files".into(), json!(file_count)),
         ("bytes".into(), json!(total_bytes)),
         ("mode".into(), json!(mode_str)),
-        ("path".into(), json!(format!("backups/{snap_rel}"))),
+        ("path".into(), json!(format!(".system/reprotect/{id}"))),
     ]))
+}
+
+/// Relocate legacy `<device>/backups/reprotect-*` packs into `.system/reprotect/`
+/// (best-effort; the old user-visible location is no longer used).
+fn relocate_legacy(local: &Local, system_dir: &Path) {
+    let Ok(entries) = fs::read_dir(&local.root) else {
+        return;
+    };
+    for ent in entries.flatten() {
+        let name = ent.file_name().to_string_lossy().to_string();
+        if !crate::protocol::is_valid_device_id(&name) {
+            continue;
+        }
+        let backups = ent.path().join("backups");
+        let Ok(packs) = fs::read_dir(&backups) else {
+            continue;
+        };
+        for pack in packs.flatten() {
+            let pack_name = pack.file_name().to_string_lossy().to_string();
+            if !pack_name.starts_with("reprotect-") {
+                continue;
+            }
+            let dest = system_dir.join(&pack_name);
+            if !dest.exists() {
+                let _ = fs::rename(pack.path(), &dest);
+            } else {
+                let _ = fs::remove_dir_all(pack.path());
+            }
+        }
+    }
+}
+
+/// Keep the latest 4 reprotect packs; older ones move to `.recycle/<date>/...`
+/// so the standard 30-day GC reclaims them.
+fn prune_reprotect(local: &Local, system_dir: &Path) {
+    let Ok(entries) = fs::read_dir(system_dir) else {
+        return;
+    };
+    let mut packs: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let n = e.file_name().to_string_lossy().to_string();
+            (n.starts_with("reprotect-") && e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .then(|| (n, e.path()))
+        })
+        .collect();
+    packs.sort_by(|a, b| b.0.cmp(&a.0)); // newest first (timestamp names)
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    for (name, path) in packs.iter().skip(4) {
+        let dest = local
+            .root
+            .join(".recycle")
+            .join(&date)
+            .join(&local.device_id)
+            .join("system")
+            .join(name);
+        if let Some(parent) = dest.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::rename(path, &dest);
+    }
 }
 
 fn build_tar(entries: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
@@ -330,8 +377,8 @@ mod tests {
         let id = out.get("id").and_then(|v| v.as_str()).unwrap();
         let manifest = dir
             .path()
-            .join(device)
-            .join("backups")
+            .join(".system")
+            .join("reprotect")
             .join(id)
             .join("manifest.json");
         assert!(manifest.exists());
@@ -356,7 +403,11 @@ mod tests {
         .unwrap();
         assert_eq!(out.get("mode").and_then(|v| v.as_str()), Some("encrypt"));
         let id = out.get("id").and_then(|v| v.as_str()).unwrap();
-        let snap = dir.path().join(device).join("backups").join(id);
+        let snap = dir
+            .path()
+            .join(".system")
+            .join("reprotect")
+            .join(id);
         assert!(snap.join("mirror.tar.enc").exists());
         let manifest: Value =
             serde_json::from_slice(&fs::read(snap.join("manifest.json")).unwrap()).unwrap();
@@ -415,5 +466,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(out.get("files").and_then(|v| v.as_i64()), Some(1));
+        // Legacy pack relocated out of user backups into .system/reprotect/.
+        assert!(!old.exists());
+        assert!(
+            dir.path()
+                .join(".system")
+                .join("reprotect")
+                .join("reprotect-20000101-000000")
+                .exists()
+        );
     }
 }

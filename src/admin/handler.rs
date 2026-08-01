@@ -330,6 +330,30 @@ pub fn index_rebuild(state: &AdminState) -> Result<Map<String, Value>, OpError> 
     ]))
 }
 
+pub fn spaces_list(state: &AdminState) -> Result<Map<String, Value>, OpError> {
+    Ok(Map::from_iter([(
+        "spaces".into(),
+        state.store.list_spaces_json(),
+    )]))
+}
+
+pub fn spaces_declare(
+    state: &AdminState,
+    name: String,
+    visibility: String,
+    encryption: Option<String>,
+    retention: Option<String>,
+    import_grant: Option<String>,
+) -> Result<Map<String, Value>, OpError> {
+    state.store.declare_space_profile(
+        &name,
+        &visibility,
+        encryption.as_deref().unwrap_or("none"),
+        retention.as_deref().unwrap_or("none"),
+        import_grant.as_deref().unwrap_or("allowed"),
+    )
+}
+
 pub fn tokens_revoke(state: &AdminState, id: String) -> Result<Map<String, Value>, OpError> {
     let store = state
         .auth

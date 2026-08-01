@@ -43,7 +43,8 @@
 
 ### 0.5.3 边界
 
-- 自定义空间经 admin `space.declare` 声明（Step 2 落地），声明时校验命名与保留前缀；
+- 自定义空间经 admin `space.declare` 声明（已落地，Step 2；`space.list` 可查），
+  声明时校验命名与保留前缀；
 - `dot` 前缀目录仍为系统保留（`.system` / `.recycle` / `.versions` / `.staging` /
   `.nexuspouch`），任何空间都不可寻址；
 - 业务约定（快照格式、附件寻址、GFS 用法、`task_id` 语义）**不属于协议层**，
@@ -461,6 +462,7 @@ master 定期（与日快照同节奏）或迁移后：将各 `<device_id>/<spac
   - 加密套件 / prologue / 传输通道改变；
   - 安全边界收窄（ACL 语义收紧必须双端同步并升版本）。
 - 已落地的 v4.2 增量 op（随里程碑落地，先有 fixture 契约）：`versions.list` / `versions.read` / `manifest`（M2）、`handoff.create` / `handoff.ack` / `artifact.state`（M3）。
+- 已落地的 v4.3 增量 op：`space.declare`（仅 loopback / admin）、`space.list`（owner）。
 - 事件：`StoreEvent` 携带单调 `seq`；`.system/events.jsonl` 持久化；watcher 用
   `GET /api/v1/events?since=<seq>` 重放历史再切实时（不丢不重）。
 - v3 → v4：新增 `sync.cursors` / `master.pointer` / `master.pointer.query` /

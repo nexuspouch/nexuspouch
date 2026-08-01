@@ -134,7 +134,7 @@ async fn uri_resolve(
     if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
         return unauthorized();
     }
-    let parsed = match uri::parse(&q.uri) {
+    let parsed = match uri::parse_with(&q.uri, &|sp| state.store.is_known_space(sp)) {
         Ok(u) => u,
         Err(e) => return op_error(e),
     };
@@ -186,7 +186,7 @@ async fn versions_uri(
     if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
         return unauthorized();
     }
-    let parsed = match uri::parse(&q.uri) {
+    let parsed = match uri::parse_with(&q.uri, &|sp| state.store.is_known_space(sp)) {
         Ok(u) => u,
         Err(e) => return op_error(e),
     };
@@ -228,7 +228,7 @@ async fn manifest_uri(
     if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
         return unauthorized();
     }
-    let parsed = match uri::parse(&q.uri) {
+    let parsed = match uri::parse_with(&q.uri, &|sp| state.store.is_known_space(sp)) {
         Ok(u) => u,
         Err(e) => return op_error(e),
     };
@@ -266,7 +266,7 @@ async fn artifact_state_uri(
     if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
         return unauthorized();
     }
-    let parsed = match uri::parse(&q.uri) {
+    let parsed = match uri::parse_with(&q.uri, &|sp| state.store.is_known_space(sp)) {
         Ok(u) => u,
         Err(e) => return op_error(e),
     };
@@ -359,7 +359,7 @@ async fn read_uri(
     if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
         return unauthorized();
     }
-    let parsed = match uri::parse(&q.uri) {
+    let parsed = match uri::parse_with(&q.uri, &|sp| state.store.is_known_space(sp)) {
         Ok(u) => u,
         Err(e) => return op_error(e),
     };
@@ -434,7 +434,7 @@ async fn list_uri(
         return unauthorized();
     }
     let parsed = if let Some(uri) = q.uri {
-        match uri::parse(&uri) {
+        match uri::parse_with(&uri, &|sp| state.store.is_known_space(sp)) {
             Ok(u) => u,
             Err(e) => return op_error(e),
         }

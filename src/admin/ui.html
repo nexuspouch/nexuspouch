@@ -152,6 +152,22 @@ td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid
     <p class="muted">agent 经 scoped token 的 agent_id 或 MCP --agent 绑定；作用域外的操作返回 acl_denied / quota_exceeded（审计记录）。</p>
   </div>
   <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2>Spaces（空间属性）</h2>
+      <button id="loadSpacesBtn">刷新</button>
+    </div>
+    <div class="row">
+      <input id="spaceName" placeholder="名称（小写字母开头）" style="min-width:8rem"/>
+      <select id="spaceVisibility">
+        <option value="shared">shared</option>
+        <option value="private">private</option>
+      </select>
+      <button id="declareSpace">声明自定义空间</button>
+    </div>
+    <pre id="spaceList" class="muted" style="margin-top:.5rem">…</pre>
+    <p class="muted">空间 = 属性驱动分区（visibility / encryption / retention / import_grant）；四内置空间不可重声明。</p>
+  </div>
+  <div class="card">
     <h2>危险区</h2>
     <p class="muted">清空本机四分区正式文件与暂存（不删他端镜像、回收站、.system）。不可从回收站还原。</p>
     <div class="row">
@@ -544,6 +560,35 @@ $('createAgent').onclick = async () => {
     });
     alert('Agent created: ' + out.id);
     loadAgents();
+  } catch (e) { $('msg').textContent = String(e.message||e); }
+};
+async function loadSpaces() {
+  try {
+    const out = await api('/admin/api/spaces');
+    const spaces = out.spaces || [];
+    $('spaceList').textContent = spaces.length
+      ? spaces.map(s =>
+          s.name + ' · ' + (s.builtin ? 'builtin' : 'custom') + ' · ' +
+          (s.visibility) + ' · enc=' + (s.encryption||'none') + ' · ret=' + (s.retention||'none'))
+        .join('\n')
+      : '(no spaces)';
+  } catch (e) {
+    $('spaceList').textContent = String(e.message||e);
+  }
+}
+$('loadSpacesBtn').onclick = () => { loadSpaces(); };
+$('declareSpace').onclick = async () => {
+  try {
+    const name = ($('spaceName').value || '').trim();
+    const visibility = $('spaceVisibility').value;
+    if (!name) return alert('请输入空间名称');
+    const out = await api('/admin/api/spaces', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name, visibility}),
+    });
+    alert('Space declared: ' + out.name + ' (' + out.visibility + ')');
+    loadSpaces();
   } catch (e) { $('msg').textContent = String(e.message||e); }
 };
 $('runReprotect').onclick = async () => {

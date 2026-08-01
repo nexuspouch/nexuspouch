@@ -173,6 +173,7 @@ pub fn is_admin_only_op(op: &str) -> bool {
             | "import.grant"
             | "import.reject"
             | "reprotect.run"
+            | "space.declare"
     ) || op.starts_with("admin.")
 }
 

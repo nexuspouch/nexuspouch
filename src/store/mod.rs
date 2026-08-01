@@ -11,6 +11,7 @@ pub mod migrate_seed;
 pub mod reprotect;
 pub mod retention;
 pub mod snapshot_crypto;
+pub mod spaces;
 pub mod versions;
 pub mod volume;
 pub mod write;
@@ -79,6 +80,7 @@ pub struct Local {
     peer_ensure: Mutex<Option<Arc<dyn PeerEnsure>>>,
     event_bus: Mutex<Option<Arc<EventBus>>>,
     index: index::SearchIndex,
+    spaces: spaces::SpaceRegistry,
     audit: AuditLog,
 }
 
@@ -105,6 +107,7 @@ impl Local {
             peer_ensure: Mutex::new(None),
             event_bus: Mutex::new(None),
             index: index::SearchIndex::open(&root),
+            spaces: spaces::SpaceRegistry::open(&root),
             audit: AuditLog::open(&root),
         };
         let ptr_path = local.pointer_path();
@@ -145,7 +148,9 @@ impl Local {
             }
             _ => frame,
         };
-        let verdict = protocol::check_acl(&frame, caller, trust, loopback);
+        let verdict = protocol::check_acl_with(&frame, caller, trust, loopback, &|sp| {
+            self.spaces.visibility(sp)
+        });
         if verdict != AclVerdict::Allow {
             let code = acl_code(verdict);
             self.audit.record(audit::deny_entry(
@@ -175,6 +180,11 @@ impl Local {
             "handoff.create" => handoff::create(self, &frame, caller),
             "handoff.ack" => handoff::ack(self, &frame, caller),
             "artifact.state" => handoff::state(self, &frame, caller),
+            "space.list" => Ok(Map::from_iter([(
+                "spaces".into(),
+                self.spaces.list_json(),
+            )])),
+            "space.declare" => self.space_declare(&frame),
             "write.begin" => write::write_begin(self, &frame, caller),
             "write.chunk" => write::write_chunk(self, &frame),
             "commit" => write::commit(self, &frame, caller),
@@ -338,6 +348,64 @@ impl Local {
             .map_err(|e| OpError::new("internal", e))
     }
 
+    pub fn is_known_space(&self, name: &str) -> bool {
+        self.spaces.is_known(name)
+    }
+
+    pub fn list_spaces_json(&self) -> serde_json::Value {
+        self.spaces.list_json()
+    }
+
+    fn space_declare(&self, frame: &Frame) -> Result<Map<String, Value>, OpError> {
+        let name = frame
+            .payload
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| OpError::new("bad_op", "space.declare requires name"))?;
+        let visibility = frame
+            .payload
+            .get("visibility")
+            .and_then(|v| v.as_str())
+            .unwrap_or("shared");
+        let encryption = frame
+            .payload
+            .get("encryption")
+            .and_then(|v| v.as_str())
+            .unwrap_or("none");
+        let retention = frame
+            .payload
+            .get("retention")
+            .and_then(|v| v.as_str())
+            .unwrap_or("none");
+        let import_grant = frame
+            .payload
+            .get("import_grant")
+            .and_then(|v| v.as_str())
+            .unwrap_or("allowed");
+        self.declare_space_profile(name, visibility, encryption, retention, import_grant)
+    }
+
+    pub fn declare_space_profile(
+        &self,
+        name: &str,
+        visibility: &str,
+        encryption: &str,
+        retention: &str,
+        import_grant: &str,
+    ) -> Result<Map<String, Value>, OpError> {
+        let p = self
+            .spaces
+            .declare(name, visibility, encryption, retention, import_grant)
+            .map_err(|e| OpError::new("bad_op", e))?;
+        Ok(Map::from_iter([
+            ("name".into(), json!(p.name)),
+            ("visibility".into(), json!(p.visibility)),
+            ("encryption".into(), json!(p.encryption)),
+            ("retention".into(), json!(p.retention)),
+            ("import_grant".into(), json!(p.import_grant)),
+        ]))
+    }
+
     pub(crate) fn peer_rpc(&self) -> Option<Arc<dyn PeerRpc>> {
         self.peer_rpc.lock().unwrap().clone()
     }
@@ -498,5 +566,136 @@ mod tests {
         let data_b64 = read["data"].as_str().unwrap();
         let decoded = base64::engine::general_purpose::STANDARD.decode(data_b64).unwrap();
         assert_eq!(decoded, content);
+    }
+
+    #[test]
+    fn custom_space_flow() {
+        let dir = tempdir().unwrap();
+        let device = "aaaaaaaaaaaaaaaa";
+        let store = Local::open(dir.path(), device).unwrap();
+
+        // Declare a custom shared space (loopback only).
+        let mut declare = Map::new();
+        declare.insert("name".into(), json!("models"));
+        declare.insert("visibility".into(), json!("shared"));
+        let out = store
+            .handle(
+                Frame::from_parts("space.declare", declare),
+                device,
+                protocol::TRUST_OWNER,
+                true,
+            )
+            .unwrap();
+        assert_eq!(out["name"], "models");
+
+        // Remote declare denied.
+        let mut declare = Map::new();
+        declare.insert("name".into(), json!("vault"));
+        let err = store
+            .handle(
+                Frame::from_parts("space.declare", declare),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "acl_denied");
+
+        // Write into the custom space.
+        let path = "model-a/weights.bin";
+        let content = b"weights";
+        use sha2::{Digest, Sha256};
+        let sha = hex::encode(Sha256::digest(content));
+        let mut begin = Map::new();
+        begin.insert("space".into(), json!("models"));
+        begin.insert("path".into(), json!(path));
+        begin.insert("size".into(), json!(content.len()));
+        begin.insert("sha256".into(), json!(sha));
+        let out = store
+            .handle(
+                Frame::from_parts("write.begin", begin),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap();
+        let upload_id = out["upload_id"].as_str().unwrap().to_string();
+        let mut chunk = Map::new();
+        chunk.insert("upload_id".into(), json!(upload_id));
+        chunk.insert("offset".into(), json!(0));
+        chunk.insert(
+            "data".into(),
+            json!(base64::engine::general_purpose::STANDARD.encode(content)),
+        );
+        store
+            .handle(
+                Frame::from_parts("write.chunk", chunk),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap();
+        let mut commit = Map::new();
+        commit.insert("space".into(), json!("models"));
+        commit.insert("upload_ids".into(), json!([upload_id]));
+        store
+            .handle(
+                Frame::from_parts("commit", commit),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap();
+
+        let mut list = Map::new();
+        list.insert("space".into(), json!("models"));
+        list.insert("path".into(), json!(""));
+        let out = store
+            .handle(
+                Frame::from_parts("list", list),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap();
+        assert!(
+            out["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["path"].as_str().unwrap().ends_with("weights.bin"))
+        );
+
+        // space.list returns builtins + declared.
+        let out = store
+            .handle(
+                Frame::from_parts("space.list", Map::new()),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap();
+        let names: Vec<&str> = out["spaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|s| s["name"].as_str())
+            .collect();
+        assert!(names.contains(&"models"));
+        assert!(names.contains(&"files"));
+
+        // Unknown (undeclared) space denied.
+        let mut mystery = Map::new();
+        mystery.insert("space".into(), json!("mystery"));
+        mystery.insert("path".into(), json!("x"));
+        let err = store
+            .handle(
+                Frame::from_parts("list", mystery),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "bad_op");
     }
 }

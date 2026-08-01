@@ -47,6 +47,8 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/agents/revoke", post(agents_revoke))
         .route("/agents/reset-quota", post(agents_reset))
         .route("/index/rebuild", post(index_rebuild))
+        .route("/spaces", get(spaces_list))
+        .route("/spaces", post(spaces_declare))
         .route("/reprotect", post(reprotect))
         .with_state(state.clone());
 
@@ -375,6 +377,42 @@ async fn agents_reset(
 
 async fn index_rebuild(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
     auth_json(state, headers, None, handler::index_rebuild).await
+}
+
+async fn spaces_list(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    auth_json(state, headers, None, handler::spaces_list).await
+}
+
+#[derive(Deserialize)]
+struct SpaceDeclareBody {
+    name: String,
+    #[serde(default = "default_space_visibility")]
+    visibility: String,
+    encryption: Option<String>,
+    retention: Option<String>,
+    import_grant: Option<String>,
+}
+
+fn default_space_visibility() -> String {
+    "shared".into()
+}
+
+async fn spaces_declare(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Json(body): Json<SpaceDeclareBody>,
+) -> Response {
+    auth_json(state, headers, None, move |s| {
+        handler::spaces_declare(
+            s,
+            body.name,
+            body.visibility,
+            body.encryption,
+            body.retention,
+            body.import_grant,
+        )
+    })
+    .await
 }
 
 #[derive(Deserialize, Default)]

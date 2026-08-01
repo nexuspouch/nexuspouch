@@ -19,7 +19,27 @@ pub struct StoreUri {
 
 const SPACES: &[&str] = &["artifacts", "files", "attachments", "backups"];
 
+/// Syntactic space-name check: `^[a-z][a-z0-9-]{0,31}$` (custom spaces
+/// declared via `space.declare` must match; built-ins trivially do).
+fn syntactically_valid_space(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_lowercase() => {}
+        _ => return false,
+    }
+    s.len() <= 32
+        && s.chars()
+            .skip(1)
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 pub fn parse(s: &str) -> Result<StoreUri, OpError> {
+    parse_with(s, &|sp| SPACES.contains(&sp))
+}
+
+/// Parse a store URI accepting spaces for which `known(space)` is true
+/// (built-ins or declared custom spaces). Unknown spaces → `bad_uri`.
+pub fn parse_with(s: &str, known: &dyn Fn(&str) -> bool) -> Result<StoreUri, OpError> {
     // Reject dot-segments on the RAW string first: `url::Url` silently
     // normalizes `..` away for some schemes, which would hide traversal
     // from normalize_path below.
@@ -39,10 +59,10 @@ pub fn parse(s: &str) -> Result<StoreUri, OpError> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let (space, rest) = if !host.is_empty() && SPACES.contains(&host) {
+    let (space, rest) = if !host.is_empty() && syntactically_valid_space(&host) && known(&host) {
         (host.to_string(), path_segments)
     } else if let Some(first) = path_segments.first() {
-        if !SPACES.contains(first) {
+        if !syntactically_valid_space(first) || !known(first) {
             return Err(OpError::new("bad_uri", format!("unknown space: {first}")));
         }
         (first.to_string(), path_segments[1..].to_vec())
@@ -50,7 +70,7 @@ pub fn parse(s: &str) -> Result<StoreUri, OpError> {
         return Err(OpError::new("bad_uri", "missing space"));
     };
 
-    if !protocol::is_valid_space(&space) {
+    if !syntactically_valid_space(&space) || !known(&space) {
         return Err(OpError::new("bad_uri", format!("invalid space: {space}")));
     }
 
