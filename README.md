@@ -18,6 +18,8 @@ cargo build --release
 
 The release binary is `target/release/nexuspouch`.
 
+Install (systemd / Docker): see [docs/INSTALL.md](docs/INSTALL.md).
+
 ## Run
 
 ```bash

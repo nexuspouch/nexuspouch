@@ -1,5 +1,7 @@
 pub mod admin;
 pub mod api;
+pub mod audit;
+pub mod auth_tokens;
 pub mod discovery;
 pub mod events;
 pub mod noise;
@@ -11,6 +13,7 @@ pub mod uri;
 pub mod webdav;
 
 pub use admin::auth::AuthConfig;
+pub use auth_tokens::TokenStore;
 pub use events::EventBus;
 pub use noise::Identity;
 pub use peer::{advertise_local_ws, Dialer, PairingHub, PeerServer, PeerStore, SessionRegistry};

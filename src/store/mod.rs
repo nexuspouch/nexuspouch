@@ -5,10 +5,12 @@ pub mod import;
 pub mod maintenance;
 pub mod master;
 pub mod migrate_seed;
+pub mod reprotect;
 pub mod retention;
 pub mod volume;
 pub mod write;
 
+use crate::audit::{self, AuditLog};
 use crate::events::EventBus;
 use crate::protocol::{self, AclVerdict, Frame};
 use cursors::DeviceCursors;
@@ -71,6 +73,7 @@ pub struct Local {
     peer_rpc: Mutex<Option<Arc<dyn PeerRpc>>>,
     peer_ensure: Mutex<Option<Arc<dyn PeerEnsure>>>,
     event_bus: Mutex<Option<Arc<EventBus>>>,
+    audit: AuditLog,
 }
 
 impl Local {
@@ -95,6 +98,7 @@ impl Local {
             peer_rpc: Mutex::new(None),
             peer_ensure: Mutex::new(None),
             event_bus: Mutex::new(None),
+            audit: AuditLog::open(&root),
         };
         let ptr_path = local.pointer_path();
         if !ptr_path.exists() {
@@ -115,7 +119,19 @@ impl Local {
     ) -> Result<Map<String, Value>, OpError> {
         let verdict = protocol::check_acl(&frame, caller, trust, loopback);
         if verdict != AclVerdict::Allow {
-            return Err(OpError::new(acl_code(verdict), verdict.as_str()));
+            let code = acl_code(verdict);
+            self.audit.record(audit::deny_entry(
+                code,
+                caller,
+                trust,
+                &frame.op,
+                code,
+                verdict.as_str(),
+                frame.space(),
+                frame.device(),
+                frame.payload.get("path").and_then(|v| v.as_str()),
+            ));
+            return Err(OpError::new(code, verdict.as_str()));
         }
         if needs_master_fence(&frame.op) {
             self.require_master()?;
@@ -233,6 +249,24 @@ impl Local {
 
     pub fn set_event_bus(&self, bus: Arc<EventBus>) {
         *self.event_bus.lock().unwrap() = Some(bus);
+    }
+
+    pub fn audit(&self) -> &AuditLog {
+        &self.audit
+    }
+
+    pub fn audit_action(&self, kind: &str, caller: &str, op: &str, message: &str) {
+        self.audit.record(audit::deny_entry(
+            kind,
+            caller,
+            protocol::TRUST_OWNER,
+            op,
+            kind,
+            message,
+            None,
+            None,
+            None,
+        ));
     }
 
     pub(crate) fn emit_event(&self, event: crate::events::StoreEvent) {

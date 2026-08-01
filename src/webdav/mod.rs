@@ -118,10 +118,7 @@ async fn dav_dispatch(
 }
 
 fn authorize(auth: &AuthConfig, headers: &HeaderMap, loopback: bool) -> bool {
-    if auth.token.is_empty() {
-        return loopback;
-    }
-    auth.authorize_headers(headers, None)
+    auth.authorize_scopes(headers, None, loopback, &["read", "admin"])
 }
 
 fn unauthorized() -> Response {

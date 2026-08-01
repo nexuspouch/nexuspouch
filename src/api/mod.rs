@@ -49,11 +49,9 @@ fn authorize(
     headers: &HeaderMap,
     query_token: Option<&str>,
     loopback: bool,
+    required: &[&str],
 ) -> bool {
-    if auth.token.is_empty() {
-        return loopback;
-    }
-    auth.authorize_headers(headers, query_token)
+    auth.authorize_scopes(headers, query_token, loopback, required)
 }
 
 fn unauthorized() -> Response {
@@ -78,7 +76,7 @@ async fn health(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Response {
-    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string())) {
+    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
         return unauthorized();
     }
     Json(json!({
@@ -101,7 +99,7 @@ async fn uri_resolve(
     headers: HeaderMap,
     Query(q): Query<UriQuery>,
 ) -> Response {
-    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string())) {
+    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
         return unauthorized();
     }
     let parsed = match uri::parse(&q.uri) {
@@ -145,7 +143,7 @@ async fn read_uri(
     headers: HeaderMap,
     Query(q): Query<ReadQuery>,
 ) -> Response {
-    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string())) {
+    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
         return unauthorized();
     }
     let parsed = match uri::parse(&q.uri) {
@@ -207,7 +205,7 @@ async fn list_uri(
     headers: HeaderMap,
     Query(q): Query<ListQuery>,
 ) -> Response {
-    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string())) {
+    if !authorize(&state.auth, &headers, None, auth::is_loopback(&addr.ip().to_string()), &["read", "admin"]) {
         return unauthorized();
     }
     let parsed = if let Some(uri) = q.uri {
@@ -257,8 +255,21 @@ async fn store_op(
     Json(body): Json<StoreBody>,
 ) -> Response {
     let loopback = auth::is_loopback(&addr.ip().to_string());
-    if !authorize(&state.auth, &headers, None, loopback) {
+    if !authorize(&state.auth, &headers, None, loopback, &["write", "admin"]) {
         return unauthorized();
+    }
+    let scopes = state
+        .auth
+        .resolve_scopes(&headers, None, loopback)
+        .unwrap_or_default();
+    if crate::auth_tokens::is_admin_only_op(&body.op)
+        && !crate::auth_tokens::scopes_allow(&scopes, &["admin"])
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"op":"error","code":"forbidden","message":"admin scope required"})),
+        )
+            .into_response();
     }
     match state.store.handle(
         Frame::from_parts(body.op, body.payload),
@@ -288,7 +299,7 @@ async fn events_sse(
     Query(q): Query<EventsQuery>,
 ) -> Response {
     let loopback = auth::is_loopback(&addr.ip().to_string());
-    if !authorize(&state.auth, &headers, q.token.as_deref(), loopback) {
+    if !authorize(&state.auth, &headers, q.token.as_deref(), loopback, &["events", "read", "admin"]) {
         return unauthorized();
     }
 
@@ -334,7 +345,7 @@ async fn events_recent(
     Query(q): Query<RecentQuery>,
 ) -> Response {
     let loopback = auth::is_loopback(&addr.ip().to_string());
-    if !authorize(&state.auth, &headers, q.token.as_deref(), loopback) {
+    if !authorize(&state.auth, &headers, q.token.as_deref(), loopback, &["events", "read", "admin"]) {
         return unauthorized();
     }
     let mut events = state.events.recent();

@@ -110,6 +110,28 @@ td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid
     <div id="recycle"></div>
   </div>
   <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2>审计 / Token / 再保护</h2>
+      <div class="row">
+        <button id="loadAudit">刷新审计</button>
+        <button id="runReprotect">再保护镜像</button>
+      </div>
+    </div>
+    <pre id="auditLog" class="muted">…</pre>
+    <div class="row" style="margin-top:.75rem">
+      <input id="tokenLabel" placeholder="token 标签" style="min-width:8rem"/>
+      <select id="tokenScope">
+        <option value="read">read</option>
+        <option value="write">write</option>
+        <option value="events">events</option>
+        <option value="admin">admin</option>
+      </select>
+      <button id="createToken">创建 API Token</button>
+    </div>
+    <pre id="tokenList" class="muted" style="margin-top:.5rem">…</pre>
+    <p class="muted">scoped token：read=只读 API/WebDAV；write=可写 store（不含 wipe/migrate）；events=SSE；admin=全权限。</p>
+  </div>
+  <div class="card">
     <h2>危险区</h2>
     <p class="muted">清空本机四分区正式文件与暂存（不删他端镜像、回收站、.system）。不可从回收站还原。</p>
     <div class="row">
@@ -325,6 +347,9 @@ async function refresh() {
     $('received').textContent = receivedList.length
       ? JSON.stringify(receivedList, null, 2) : '（无）';
 
+    await loadAudit();
+    await loadTokens();
+
     const rec = await api('/admin/api/recycle');
     const entries = rec.entries || [];
     if (!entries.length) {
@@ -422,6 +447,57 @@ async function refreshDiscovery() {
 $('runDiag').onclick = runDiagnostics;
 $('refreshDiscovery').onclick = refreshDiscovery;
 $('refresh').onclick = refresh;
+
+async function loadAudit() {
+  try {
+    const out = await api('/admin/api/audit?limit=40');
+    const entries = out.entries || [];
+    if (!entries.length) {
+      $('auditLog').textContent = '(empty)';
+      return;
+    }
+    $('auditLog').textContent = entries.map(e =>
+      (e.ts_ms||'') + ' ' + (e.kind||'') + ' ' + (e.op||'') +
+      ' caller=' + shortId(e.caller) + ' trust=' + (e.trust||'') +
+      ' ' + (e.message||'')
+    ).join('\n');
+  } catch (e) {
+    $('auditLog').textContent = String(e.message||e);
+  }
+}
+async function loadTokens() {
+  try {
+    const out = await api('/admin/api/tokens');
+    const tokens = out.tokens || [];
+    $('tokenList').textContent = tokens.length
+      ? tokens.map(t => t.id + ' · ' + t.label + ' · [' + (t.scopes||[]).join(',') + ']').join('\n')
+      : '(no scoped tokens)';
+  } catch (e) {
+    $('tokenList').textContent = String(e.message||e);
+  }
+}
+$('loadAudit').onclick = () => { loadAudit(); loadTokens(); };
+$('createToken').onclick = async () => {
+  try {
+    const label = ($('tokenLabel').value || 'api').trim();
+    const scopes = [$('tokenScope').value];
+    const out = await api('/admin/api/tokens', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({label, scopes}),
+    });
+    alert('Token (copy now):\n' + out.token);
+    loadTokens();
+  } catch (e) { $('msg').textContent = String(e.message||e); }
+};
+$('runReprotect').onclick = async () => {
+  if (!confirm('对本机 master 镜像树生成 reprotect 清单快照？')) return;
+  try {
+    const out = await api('/admin/api/reprotect', {method:'POST'});
+    alert('reprotect ok: ' + JSON.stringify(out));
+    refresh();
+  } catch (e) { $('msg').textContent = String(e.message||e); }
+};
 $('pairStart').onclick = async () => {
   try {
     const out = await api('/admin/api/pairing/start', {method:'POST'});

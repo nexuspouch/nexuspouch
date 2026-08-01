@@ -8,6 +8,7 @@ use axum::{
 use clap::Parser;
 use nexuspouch::{
     admin::{self, handler::AdminState, auth::is_loopback},
+    TokenStore,
     api::{self, ApiState},
     discovery::{self, Discovery},
     events::EventBus,
@@ -114,6 +115,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = Arc::new(Local::open(&args.root, &device)?);
     let event_bus = EventBus::new();
     store.set_event_bus(Arc::clone(&event_bus));
+    let token_store = Arc::new(TokenStore::open(&args.root));
+    let auth_cfg = nexuspouch::AuthConfig::new(token.clone(), Some(Arc::clone(&token_store)));
     if let Ok(n) = gc::gc_staging(&store, Duration::ZERO) {
         if n > 0 {
             tracing::info!("gc staging: removed {n} abandoned uploads");
@@ -179,9 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let admin_state = Arc::new(AdminState {
         store: Arc::clone(&store),
-        auth: nexuspouch::AuthConfig {
-            token: token.clone(),
-        },
+        auth: auth_cfg.clone(),
         device: device.clone(),
         hub: Some(Arc::clone(&hub)),
         peers: Some(Arc::clone(&peers)),
@@ -196,18 +197,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let api_state = Arc::new(ApiState {
         store: Arc::clone(&store),
-        auth: nexuspouch::AuthConfig {
-            token: token.clone(),
-        },
+        auth: auth_cfg.clone(),
         device: device.clone(),
         events: Arc::clone(&event_bus),
         mdns: mdns_advertising,
     });
     let webdav_state = Arc::new(WebDavState {
         store: Arc::clone(&store),
-        auth: nexuspouch::AuthConfig {
-            token: token.clone(),
-        },
+        auth: auth_cfg.clone(),
     });
 
     let device_log = device.clone();

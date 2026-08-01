@@ -38,6 +38,11 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/devices/wipe-self", post(device_wipe_self))
         .route("/discovery", get(discovery))
         .route("/diagnostics", get(diagnostics))
+        .route("/audit", get(audit))
+        .route("/tokens", get(tokens_list))
+        .route("/tokens", post(tokens_create))
+        .route("/tokens/revoke", post(tokens_revoke))
+        .route("/reprotect", post(reprotect))
         .with_state(state.clone());
 
     Router::new()
@@ -262,6 +267,60 @@ async fn diagnostics(State(state): State<Arc<AdminState>>, headers: HeaderMap) -
         .await
         .unwrap_or_default();
     Json(Value::Object(report)).into_response()
+}
+
+#[derive(Deserialize)]
+struct AuditQuery {
+    limit: Option<usize>,
+}
+
+async fn audit(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Query(q): Query<AuditQuery>,
+) -> Response {
+    let limit = q.limit.unwrap_or(50).min(200);
+    auth_json(state, headers, None, |s| handler::audit_list(s, limit)).await
+}
+
+async fn tokens_list(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    auth_json(state, headers, None, |s| handler::tokens_list(s)).await
+}
+
+#[derive(Deserialize)]
+struct TokenCreateBody {
+    label: Option<String>,
+    scopes: Option<Vec<String>>,
+}
+
+async fn tokens_create(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Json(body): Json<TokenCreateBody>,
+) -> Response {
+    let label = body.label.unwrap_or_else(|| "api".into());
+    let scopes = body.scopes.unwrap_or_else(|| vec!["read".into()]);
+    auth_json(state, headers, None, move |s| {
+        handler::tokens_create(s, label, scopes)
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct TokenRevokeBody {
+    id: String,
+}
+
+async fn tokens_revoke(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Json(body): Json<TokenRevokeBody>,
+) -> Response {
+    auth_json(state, headers, None, move |s| handler::tokens_revoke(s, body.id)).await
+}
+
+async fn reprotect(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    auth_json(state, headers, None, |s| handler::reprotect_run(s)).await
 }
 
 async fn auth_json<F>(

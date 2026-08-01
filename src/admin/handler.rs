@@ -222,7 +222,75 @@ pub fn master_migrate(state: &AdminState) -> Result<Map<String, Value>, OpError>
             .unwrap_or(0);
         data.insert("broadcast_peers".into(), json!(n));
     }
+    state
+        .store
+        .audit_action("migrate", &state.device, "master.migrate", "admin migrate");
     Ok(data)
+}
+
+pub fn audit_list(state: &AdminState, limit: usize) -> Result<Map<String, Value>, OpError> {
+    Ok(state.store.audit().recent_json(limit))
+}
+
+pub fn tokens_list(state: &AdminState) -> Result<Map<String, Value>, OpError> {
+    let tokens = state
+        .auth
+        .tokens
+        .as_ref()
+        .map(|t| t.list_public())
+        .unwrap_or_default();
+    Ok(Map::from_iter([(
+        "tokens".into(),
+        Value::Array(tokens.into_iter().map(Value::Object).collect()),
+    )]))
+}
+
+pub fn tokens_create(
+    state: &AdminState,
+    label: String,
+    scopes: Vec<String>,
+) -> Result<Map<String, Value>, OpError> {
+    let store = state
+        .auth
+        .tokens
+        .as_ref()
+        .ok_or_else(|| OpError::new("internal", "token store unavailable"))?;
+    let t = store
+        .create(&label, scopes)
+        .map_err(|e| OpError::new("bad_op", e))?;
+    Ok(Map::from_iter([
+        ("id".into(), json!(t.id)),
+        ("token".into(), json!(t.token)),
+        ("label".into(), json!(t.label)),
+        ("scopes".into(), json!(t.scopes)),
+        ("created_ms".into(), json!(t.created_ms)),
+    ]))
+}
+
+pub fn tokens_revoke(state: &AdminState, id: String) -> Result<Map<String, Value>, OpError> {
+    let store = state
+        .auth
+        .tokens
+        .as_ref()
+        .ok_or_else(|| OpError::new("internal", "token store unavailable"))?;
+    let ok = store
+        .revoke(&id)
+        .map_err(|e| OpError::new("internal", e))?;
+    Ok(Map::from_iter([
+        ("ok".into(), json!(ok)),
+        ("id".into(), json!(id)),
+    ]))
+}
+
+pub fn reprotect_run(state: &AdminState) -> Result<Map<String, Value>, OpError> {
+    let copy = std::env::var("NEXUSPOUCH_REPROTECT_COPY")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let out = crate::store::reprotect::run(&state.store, copy)?;
+    state
+        .store
+        .audit_action("reprotect", &state.device, "reprotect.run", "admin reprotect");
+    Ok(out)
 }
 
 pub fn browse(
@@ -253,6 +321,12 @@ pub fn browse_delete(
 
 pub fn device_purge(state: &AdminState, device_id: String) -> Result<Map<String, Value>, OpError> {
     let freed = crate::store::maintenance::purge_device(&state.store, &device_id, &state.device)?;
+    state.store.audit_action(
+        "purge",
+        &state.device,
+        "devices.purge",
+        &format!("purged {device_id}"),
+    );
     Ok(Map::from_iter([
         ("ok".into(), json!(true)),
         ("device_id".into(), json!(device_id)),
@@ -265,6 +339,9 @@ pub fn device_wipe_self(state: &AdminState, confirm: &str) -> Result<Map<String,
         return Err(OpError::new("bad_op", r#"confirm must be "DELETE""#));
     }
     let freed = crate::store::maintenance::wipe_self(&state.store, &state.device)?;
+    state
+        .store
+        .audit_action("wipe", &state.device, "devices.wipe-self", "wipe self");
     Ok(Map::from_iter([
         ("ok".into(), json!(true)),
         ("device_id".into(), json!(state.device)),
