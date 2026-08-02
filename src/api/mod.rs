@@ -301,6 +301,12 @@ struct SearchQuery {
     project: Option<String>,
     since_ms: Option<i64>,
     until_ms: Option<i64>,
+    /// R2: rule rerank (default from NEXUSPOUCH_RERANK).
+    rerank: Option<bool>,
+    /// R2: collapse sessions by agent/project (default on for space=sessions).
+    dedup: Option<bool>,
+    /// R2: ±N turn fragment around best match (default 1 for sessions).
+    context_turns: Option<usize>,
 }
 
 fn default_search_limit() -> usize {
@@ -333,7 +339,12 @@ async fn search_uri(
         until_ms: q.until_ms,
     };
     let filter = (!filter.is_empty()).then_some(filter);
-    match state.store.search_query(
+    let opts = crate::store::SearchOptions {
+        rerank: q.rerank,
+        dedup: q.dedup,
+        context_turns: q.context_turns,
+    };
+    match state.store.search_query_ex(
         &q.q,
         q.space.as_deref(),
         q.device.as_deref(),
@@ -341,6 +352,7 @@ async fn search_uri(
         q.limit,
         q.semantic,
         filter.as_ref(),
+        &opts,
     ) {
         Ok(out) => Json(Value::Object(out)).into_response(),
         Err(e) => op_error(e),

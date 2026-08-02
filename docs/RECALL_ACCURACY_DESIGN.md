@@ -48,7 +48,7 @@
 |------|---------|------|
 | 混合检索（FTS5 + 向量 RRF） | 语义 vs 精确术语互补 | ✅ 已落地（hybrid） |
 | 元数据过滤（agent/project/date/space） | 缩小候选空间 | ✅ 已落地（R1 `SearchFilter`，透出 HTTP/帧/MCP） |
-| 两阶段召回：粗召回 top-50 → rerank top-10 | 精排提升准确率最有效 | 待实现（R2） |
+| 两阶段召回：粗召回 top-50 → rerank top-10 | 精排提升准确率最有效 | ✅ 已落地（R2 规则 rerank；小模型/远程 LLM 仍待评估） |
 | query 理解/改写（口语化、中英混合、拼写容错） | 用户 query 不精确 | 待评估（R2 后） |
 | embedding 模型升级 | 语义更强但资源涨 | 本地优先约束下收益有限 |
 
@@ -81,7 +81,7 @@
 | 阶段 | 内容 | 预估 |
 |------|------|------|
 | R1 | 评估集 + `recall eval` + Recall@K/MRR/nDCG + 召回参数化（top_k/filter/权重） | ✅ 已落地（2026-08-02） |
-| R2 | 两阶段召回（粗召回 + 规则/小模型 rerank）+ 时间衰减 + 去重聚合 + 片段返回 | 1 周 |
+| R2 | 两阶段召回（粗召回 + 规则/小模型 rerank）+ 时间衰减 + 去重聚合 + 片段返回 | ✅ 已落地（2026-08-02；规则 v1；可选小模型/远程仍待） |
 | R3 | 反馈闭环（点击/采纳/纠错事件）+ 定期回归 + 可选 A/B | 1 周 |
 
 ## 5. 与现有能力的关系
@@ -89,9 +89,11 @@
 - 混合检索基线已就位（H 向量搜索 P1 + I 会话 P2 `session_recall`）；
 - R1 评估集放共享 fixture，双端与 CI 可回归；
 - 参数化查询经 `session_recall` / `store_search` / HTTP `/api/v1/search` 透出
-  （agent/project/since_ms/until_ms；`NEXUSPOUCH_RRF_K` / `NEXUSPOUCH_SEARCH_OVERFETCH`）；
+  （agent/project/since_ms/until_ms；R2：`rerank`/`dedup`/`context_turns`；
+  `NEXUSPOUCH_RRF_K` / `NEXUSPOUCH_SEARCH_OVERFETCH` /
+  `NEXUSPOUCH_RERANK` / `NEXUSPOUCH_SEARCH_COARSE` / `NEXUSPOUCH_TIME_DECAY_DAYS`）；
 - **P1.5 整合**：`/admin/sessions` 搜索屏与 `/admin/api/sessions/search` 透出同一
-  `SearchFilter`（agent / project / 日期范围 + semantic hybrid）；
+  `SearchFilter` + R2 去重/片段（agent / project / 日期范围 + semantic hybrid）；
 - 反馈事件走现有 EventBus / 审计链路（R3）。
 
 ## 6. 风险与对策

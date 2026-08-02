@@ -246,6 +246,7 @@ pub fn search(
     limit: usize,
     semantic: bool,
     filter: Option<&crate::store::SearchFilter>,
+    opts: &crate::store::SearchOptions,
 ) -> Result<Map<String, Value>, OpError> {
     let q = q.trim();
     if q.is_empty() {
@@ -257,7 +258,7 @@ pub fn search(
         }
     }
     let limit = if limit == 0 { 50 } else { limit.clamp(1, 200) };
-    local.search_query(
+    local.search_query_ex(
         q,
         Some(spaces::SESSIONS_SPACE),
         device,
@@ -265,6 +266,7 @@ pub fn search(
         limit,
         semantic,
         filter,
+        opts,
     )
 }
 
@@ -617,12 +619,13 @@ mod tests {
         let (_dir, local) = open_local();
         write_session(&local, "claude-code/s-1.jsonl", &fixture("session_claude.jsonl"));
         local.rebuild_index().unwrap();
+        let opts = crate::store::SearchOptions::default();
         // Validation.
-        assert!(search(&local, "", None, 0, false, None).is_err());
-        assert!(search(&local, "   ", None, 0, false, None).is_err());
-        assert!(search(&local, "q", Some("nope"), 0, false, None).is_err());
+        assert!(search(&local, "", None, 0, false, None, &opts).is_err());
+        assert!(search(&local, "   ", None, 0, false, None, &opts).is_err());
+        assert!(search(&local, "q", Some("nope"), 0, false, None, &opts).is_err());
         // Content hit through the real index pipeline (fixture mentions deploy).
-        let out = search(&local, "deploy", None, 0, false, None).unwrap();
+        let out = search(&local, "deploy", None, 0, false, None, &opts).unwrap();
         assert!(out["total"].as_u64().unwrap() >= 1);
         let uris: Vec<&str> = out["results"]
             .as_array()
@@ -633,7 +636,7 @@ mod tests {
         assert!(uris.iter().any(|u| u.contains("claude-code/s-1.jsonl")));
         assert_eq!(out["score_type"], "keyword");
         // Semantic path returns structured fields even without a model.
-        let sem = search(&local, "deploy", None, 0, true, None).unwrap();
+        let sem = search(&local, "deploy", None, 0, true, None, &opts).unwrap();
         assert!(sem.get("score_type").is_some());
         assert!(sem.get("degraded").is_some());
         // R1 agent filter: only matching path prefix.
@@ -641,13 +644,13 @@ mod tests {
             agent: Some("claude-code".into()),
             ..Default::default()
         };
-        let filtered = search(&local, "deploy", None, 0, false, Some(&agent)).unwrap();
+        let filtered = search(&local, "deploy", None, 0, false, Some(&agent), &opts).unwrap();
         assert!(filtered["total"].as_u64().unwrap() >= 1);
         let miss = crate::store::SearchFilter {
             agent: Some("codex".into()),
             ..Default::default()
         };
-        let empty = search(&local, "deploy", None, 0, false, Some(&miss)).unwrap();
+        let empty = search(&local, "deploy", None, 0, false, Some(&miss), &opts).unwrap();
         assert_eq!(empty["total"], 0);
     }
 }

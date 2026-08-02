@@ -368,6 +368,12 @@ async function showSearch(params) {
   sem.checked = params.get('semantic') === 'true';
   semLabel.appendChild(sem);
   semLabel.appendChild(el('span', null, '语义回忆（hybrid）'));
+  const dedupLabel = el('label', 'row');
+  const dedup = el('input');
+  dedup.type = 'checkbox';
+  dedup.checked = params.get('dedup') !== 'false';
+  dedupLabel.appendChild(dedup);
+  dedupLabel.appendChild(el('span', null, '按项目去重'));
   const go = el('button', null, '搜索');
   go.type = 'submit';
   form.appendChild(q);
@@ -377,6 +383,7 @@ async function showSearch(params) {
   form.appendChild(untilIn);
   form.appendChild(devSel);
   form.appendChild(semLabel);
+  form.appendChild(dedupLabel);
   form.appendChild(go);
   card.appendChild(form);
   const results = el('div');
@@ -404,18 +411,20 @@ async function showSearch(params) {
     if (sinceIn.value) p.set('since_ms', String(Date.parse(sinceIn.value + 'T00:00:00Z')));
     if (untilIn.value) p.set('until_ms', String(Date.parse(untilIn.value + 'T23:59:59Z')));
     if (sem.checked) p.set('semantic', 'true');
+    if (!dedup.checked) p.set('dedup', 'false');
     if (devSel.value) p.set('device', devSel.value);
     location.hash = '#/search?' + p.toString();
   };
   const query = (params.get('q') || '').trim();
   if (!query) {
     results.appendChild(el('p', 'muted',
-      '输入查询开始。可按 agent / project / 日期过滤；勾选「语义回忆」走 FTS5+向量混合排序。'));
+      '输入查询开始。可按 agent / project / 日期过滤；勾选「语义回忆」走 FTS5+向量混合排序；默认按项目去重并附带片段上下文。'));
     return;
   }
   try {
     const p = new URLSearchParams({q: query});
     if (params.get('semantic') === 'true') p.set('semantic', 'true');
+    if (params.get('dedup') === 'false') p.set('dedup', 'false');
     if (params.get('device')) p.set('device', params.get('device'));
     if (params.get('agent')) p.set('agent', params.get('agent'));
     if (params.get('project')) p.set('project', params.get('project'));
@@ -425,6 +434,8 @@ async function showSearch(params) {
     results.innerHTML = '';
     const meta = el('p', 'muted',
       '命中 ' + (out.total||0) + ' 条 · ' + (out.score_type||'keyword') +
+      (out.rerank ? ' · rerank' : '') +
+      (out.dedup ? ' · dedup' : '') +
       (out.embedder ? ' · ' + out.embedder : ''));
     results.appendChild(meta);
     if (out.degraded) {
@@ -443,12 +454,22 @@ async function showSearch(params) {
       head.appendChild(link);
       head.appendChild(el('span', 'muted', ' · 设备 ' + shortId(h.device)));
       if (h.score_type) head.appendChild(el('span', 'badge', h.score_type));
+      if (h.occurrence_label) head.appendChild(el('span', 'badge', h.occurrence_label));
+      else if (h.occurrences && h.occurrences > 1) head.appendChild(el('span', 'badge', h.occurrences + '×'));
       box.appendChild(head);
       const snip = el('div', 'snip');
       // FTS snippet carries <b> marks: escape first, then re-allow <b> only.
       snip.innerHTML = esc(h.snippet || '')
         .replaceAll('&lt;b&gt;', '<b>').replaceAll('&lt;/b&gt;', '</b>');
       box.appendChild(snip);
+      if (h.fragment && Array.isArray(h.fragment.turns) && h.fragment.turns.length) {
+        const frag = el('div', 'snip');
+        frag.style.opacity = '0.85';
+        frag.textContent = (h.fragment.turns || [])
+          .map(t => (t.focus ? '▶ ' : '  ') + (t.role || '') + ': ' + String(t.content || '').slice(0, 160))
+          .join('\n');
+        box.appendChild(frag);
+      }
       results.appendChild(box);
     }
   } catch (e) { setMsg(e); }

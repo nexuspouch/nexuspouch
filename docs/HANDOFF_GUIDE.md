@@ -38,7 +38,7 @@
 | G 快照管理薄层 | **未成文，先补设计**（建议并入 SPACE_BOUNDARY_DESIGN 或独立文档） | 只有讨论记录 |
 | H 向量搜索 P1-P3 | VECTOR_SEARCH_DESIGN.md（已定稿） | 按里程碑推进 |
 | I 会话历史管理（P1–P3 + P1.5 Web UI） | SESSION_HISTORY_DESIGN.md + BACKLOG I | 深链 hub↔节点后置 |
-| J 召回准确性（R1 已落地；R2/R3 待） | RECALL_ACCURACY_DESIGN.md | R1 已合入 `codex/backlog-auto`；P1.5 搜索已接 SearchFilter |
+| J 召回准确性（R1/R2 已落地；R3 待） | RECALL_ACCURACY_DESIGN.md | R2 在 `codex/recall-r2`：规则 rerank + 去重/片段；P1.5 已接 |
 
 ## 3. 工作规则（红线）
 

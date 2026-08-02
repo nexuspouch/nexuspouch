@@ -14,6 +14,7 @@ pub mod migrate_seed;
 pub mod recall_eval;
 pub mod reprotect;
 pub mod retention;
+pub mod rerank;
 pub mod sanitize;
 pub mod session_adapt;
 pub mod snapshot_crypto;
@@ -52,6 +53,28 @@ pub trait PeerEnsure: Send + Sync {
 }
 
 pub const MAX_CHUNK: usize = 65536;
+
+/// R2 second-stage options (RECALL_ACCURACY_DESIGN §2.1 / §3).
+/// `None` fields use env / space defaults.
+#[derive(Debug, Clone, Default)]
+pub struct SearchOptions {
+    pub rerank: Option<bool>,
+    pub dedup: Option<bool>,
+    pub context_turns: Option<usize>,
+}
+
+impl SearchOptions {
+    pub fn from_payload(p: &Map<String, Value>) -> Self {
+        Self {
+            rerank: p.get("rerank").and_then(|v| v.as_bool()),
+            dedup: p.get("dedup").and_then(|v| v.as_bool()),
+            context_turns: p
+                .get("context_turns")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize),
+        }
+    }
+}
 
 /// Optional recall filters (R1 parameterization, RECALL_ACCURACY_DESIGN §5).
 ///
@@ -530,6 +553,11 @@ impl Local {
     /// Vector unavailable → FTS5 with `degraded: true`. Only one side hits →
     /// that side's `score_type` (`keyword` / `vector`).
     ///
+    /// R2 (default on via `NEXUSPOUCH_RERANK=rules`): coarse overfetch →
+    /// rule rerank (time decay + keyword boost) → optional sessions dedup →
+    /// optional ±N turn fragment. Disable with `NEXUSPOUCH_RERANK=off` or
+    /// payload `rerank: false`.
+    ///
     /// `filter` narrows candidates by agent/project (path-derived) and mtime
     /// range; RRF k and the overfetch multiplier come from
     /// NEXUSPOUCH_RRF_K / NEXUSPOUCH_SEARCH_OVERFETCH (defaults 60 / 3).
@@ -544,23 +572,114 @@ impl Local {
         semantic: bool,
         filter: Option<&SearchFilter>,
     ) -> Result<Map<String, Value>, OpError> {
+        self.search_query_ex(
+            q,
+            space,
+            device,
+            state,
+            limit,
+            semantic,
+            filter,
+            &SearchOptions::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_query_ex(
+        &self,
+        q: &str,
+        space: Option<&str>,
+        device: Option<&str>,
+        state: Option<&str>,
+        limit: usize,
+        semantic: bool,
+        filter: Option<&SearchFilter>,
+        opts: &SearchOptions,
+    ) -> Result<Map<String, Value>, OpError> {
         let limit = limit.clamp(1, 200);
-        if !semantic {
-            let results = self.search_index(q, space, device, state, limit, filter)?;
-            return Ok(Map::from_iter([
+        let do_rerank = opts.rerank.unwrap_or_else(rerank::rerank_enabled_from_env);
+        let do_dedup = opts
+            .dedup
+            .unwrap_or_else(|| space == Some(spaces::SESSIONS_SPACE));
+        let context_turns = opts.context_turns.unwrap_or_else(|| {
+            if space == Some(spaces::SESSIONS_SPACE) {
+                1
+            } else {
+                0
+            }
+        });
+        let coarse = if do_rerank {
+            rerank::coarse_from_env(limit).max(limit * overfetch_mult_from_env())
+        } else if semantic {
+            (limit * overfetch_mult_from_env()).clamp(limit, 200)
+        } else {
+            limit
+        };
+
+        let mut out = if !semantic {
+            let results = self.search_index(q, space, device, state, coarse, filter)?;
+            Map::from_iter([
                 ("query".into(), json!(q)),
                 ("total".into(), json!(results.len())),
                 ("results".into(), json!(results)),
                 ("score_type".into(), json!("keyword")),
                 ("degraded".into(), json!(false)),
-            ]));
+            ])
+        } else {
+            self.search_hybrid(q, space, device, state, limit, coarse, filter)?
+        };
+
+        let mut results = out
+            .remove("results")
+            .and_then(|v| match v {
+                Value::Array(a) => Some(a),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        if do_rerank && !results.is_empty() {
+            let uris: Vec<String> = results
+                .iter()
+                .filter_map(|h| h.get("uri").and_then(|v| v.as_str()).map(str::to_string))
+                .collect();
+            let mtimes = self.index.mtimes_for(&uris);
+            rerank::attach_mtimes(&mut results, &mtimes);
+            rerank::rule_rerank(q, &mut results, &rerank::RerankOpts::default());
+            out.insert("rerank".into(), json!(true));
         }
 
-        let overfetch = (limit * overfetch_mult_from_env()).clamp(limit, 200);
-        let keyword = self.search_index(q, space, device, state, overfetch, filter)?;
+        if do_dedup && space == Some(spaces::SESSIONS_SPACE) {
+            results = rerank::dedup_by_session_group(results);
+            out.insert("dedup".into(), json!(true));
+        }
+
+        results.truncate(limit);
+
+        if context_turns > 0 && space == Some(spaces::SESSIONS_SPACE) {
+            self.enrich_session_fragments(q, &mut results, context_turns);
+            out.insert("context_turns".into(), json!(context_turns));
+        }
+
+        out.insert("total".into(), json!(results.len()));
+        out.insert("results".into(), json!(results));
+        Ok(out)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn search_hybrid(
+        &self,
+        q: &str,
+        space: Option<&str>,
+        device: Option<&str>,
+        state: Option<&str>,
+        limit: usize,
+        coarse: usize,
+        filter: Option<&SearchFilter>,
+    ) -> Result<Map<String, Value>, OpError> {
+        let keyword = self.search_index(q, space, device, state, coarse, filter)?;
         let vector_res = if self.vector.available() {
             self.vector
-                .search(q, space, device, overfetch, filter)
+                .search(q, space, device, coarse, filter)
                 .map(|hits| self.apply_time_filter(hits, filter))
         } else {
             Err("vector_unavailable".into())
@@ -572,7 +691,7 @@ impl Local {
                 ("total".into(), json!(keyword.len().min(limit))),
                 (
                     "results".into(),
-                    json!(keyword.into_iter().take(limit).collect::<Vec<_>>()),
+                    json!(keyword.into_iter().take(coarse).collect::<Vec<_>>()),
                 ),
                 ("score_type".into(), json!("keyword")),
                 ("degraded".into(), json!(true)),
@@ -591,7 +710,7 @@ impl Local {
                 ("total".into(), json!(keyword.len().min(limit))),
                 (
                     "results".into(),
-                    json!(keyword.into_iter().take(limit).collect::<Vec<_>>()),
+                    json!(keyword.into_iter().take(coarse).collect::<Vec<_>>()),
                 ),
                 ("score_type".into(), json!("keyword")),
                 ("degraded".into(), json!(false)),
@@ -602,7 +721,7 @@ impl Local {
                 ("total".into(), json!(vector.len().min(limit))),
                 (
                     "results".into(),
-                    json!(vector.into_iter().take(limit).collect::<Vec<_>>()),
+                    json!(vector.into_iter().take(coarse).collect::<Vec<_>>()),
                 ),
                 ("score_type".into(), json!("vector")),
                 ("degraded".into(), json!(false)),
@@ -627,7 +746,7 @@ impl Local {
                     .filter_map(|h| h.get("uri").and_then(|v| v.as_str()).map(|u| (u, h)))
                     .collect();
                 let mut results = Vec::new();
-                for (uri, score) in fused.into_iter().take(limit) {
+                for (uri, score) in fused.into_iter().take(coarse) {
                     let mut hit = if let Some(h) = kw_by_uri.get(uri.as_str()) {
                         (*h).clone()
                     } else if let Some(h) = vec_by_uri.get(uri.as_str()) {
@@ -657,6 +776,43 @@ impl Local {
                     ("degraded".into(), json!(false)),
                     ("embedder".into(), json!(self.vector.embedder_name())),
                 ]))
+            }
+        }
+    }
+
+    fn enrich_session_fragments(&self, q: &str, results: &mut [Value], window: usize) {
+        for h in results.iter_mut() {
+            let Some(uri) = h.get("uri").and_then(|v| v.as_str()).map(str::to_string) else {
+                continue;
+            };
+            let Ok(parsed) = crate::uri::parse(&uri) else {
+                continue;
+            };
+            if parsed.space != spaces::SESSIONS_SPACE {
+                continue;
+            }
+            let Ok(path) = browse::resolve_path(self, &parsed.space, &parsed.device, &parsed.path)
+            else {
+                continue;
+            };
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let adapted = session_adapt::adapt_transcript(&raw, &parsed.path);
+            if let Some(frag) = rerank::session_fragment(&adapted.turns, q, window) {
+                if let Some(obj) = h.as_object_mut() {
+                    if let Some(text) = frag.get("text").cloned() {
+                        // Prefer fragment text when FTS snippet is thin.
+                        let snip = obj
+                            .get("snippet")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if snip.chars().count() < 40 {
+                            obj.insert("snippet".into(), text);
+                        }
+                    }
+                    obj.insert("fragment".into(), Value::Object(frag));
+                }
             }
         }
     }
@@ -722,7 +878,17 @@ impl Local {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let filter = SearchFilter::from_payload(&frame.payload);
-        self.search_query(q, space, device, state, limit, semantic, filter.as_ref())
+        let opts = SearchOptions::from_payload(&frame.payload);
+        self.search_query_ex(
+            q,
+            space,
+            device,
+            state,
+            limit,
+            semantic,
+            filter.as_ref(),
+            &opts,
+        )
     }
 
     fn op_events_list(&self, frame: &Frame) -> Result<Map<String, Value>, OpError> {

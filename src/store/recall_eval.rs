@@ -296,7 +296,14 @@ pub fn evaluate(
     let mut outcomes = Vec::with_capacity(fixture.queries.len());
     for query in &fixture.queries {
         let filter = query.filter.as_ref().map(SearchFilter::from);
-        let out = store.search_query(
+        // Eval measures URI-level Recall@K: keep rerank on (product default)
+        // but disable session-group dedup so gold URIs are not collapsed away.
+        let opts = super::SearchOptions {
+            dedup: Some(false),
+            context_turns: Some(0),
+            ..Default::default()
+        };
+        let out = store.search_query_ex(
             &query.q,
             Some(super::spaces::SESSIONS_SPACE),
             None,
@@ -304,6 +311,7 @@ pub fn evaluate(
             k,
             semantic,
             filter.as_ref(),
+            &opts,
         )?;
         // Dedupe: vector hits are per-chunk, fusion per-URI.
         let mut ranked: Vec<String> = Vec::new();

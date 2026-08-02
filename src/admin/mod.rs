@@ -482,6 +482,9 @@ struct SessionsSearchQuery {
     project: Option<String>,
     since_ms: Option<i64>,
     until_ms: Option<i64>,
+    rerank: Option<bool>,
+    dedup: Option<bool>,
+    context_turns: Option<usize>,
 }
 
 async fn sessions_search(
@@ -497,6 +500,11 @@ async fn sessions_search(
             until_ms: q.until_ms,
         };
         let filter = (!filter.is_empty()).then_some(filter);
+        let opts = crate::store::SearchOptions {
+            rerank: q.rerank,
+            dedup: q.dedup,
+            context_turns: q.context_turns,
+        };
         sessions::search(
             &s.store,
             &q.q,
@@ -504,6 +512,7 @@ async fn sessions_search(
             q.limit.unwrap_or(0),
             q.semantic,
             filter.as_ref(),
+            &opts,
         )
     })
     .await
