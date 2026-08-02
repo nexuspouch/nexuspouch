@@ -283,7 +283,7 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
                 }
             }
         }
-        if let Err(e) = fs::rename(&p.u.tmp, &dest) {
+        if let Err(e) = super::fsutil::rename_replace(&p.u.tmp, &dest) {
             failed.push(json!({"upload_id": p.id, "error": e.to_string()}));
             continue;
         }
@@ -426,20 +426,16 @@ pub fn reject_symlink_under(space_root: &PathBuf, path: &PathBuf) -> Result<(), 
     {
         // For not-yet-existing paths, walk relative segments
     }
-    if let Ok(meta) = fs::symlink_metadata(&space_root) {
-        if meta.file_type().is_symlink() {
-            return Err(OpError::new("bad_path", "symlink not allowed"));
-        }
+    if super::fsutil::is_symlink_or_reparse(&space_root) {
+        return Err(OpError::new("bad_path", "symlink not allowed"));
     }
     if let Ok(rel) = path_clean.strip_prefix(&space_root) {
         let mut cur = space_root.clone();
         for seg in rel.components() {
             if let std::path::Component::Normal(s) = seg {
                 cur.push(s);
-                if let Ok(meta) = fs::symlink_metadata(&cur) {
-                    if meta.file_type().is_symlink() {
-                        return Err(OpError::new("bad_path", "symlink not allowed"));
-                    }
+                if super::fsutil::is_symlink_or_reparse(&cur) {
+                    return Err(OpError::new("bad_path", "symlink not allowed"));
                 }
             }
         }

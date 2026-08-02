@@ -245,7 +245,7 @@ fn rename_bound_path(
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::rename(&from, &to).map_err(|e| e.to_string())?;
+    super::fsutil::rename_replace(&from, &to).map_err(|e| e.to_string())?;
 
     let v_from = local
         .root
@@ -263,7 +263,7 @@ fn rename_bound_path(
         if let Some(parent) = v_to.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let _ = fs::rename(&v_from, &v_to);
+        let _ = super::fsutil::rename_replace(&v_from, &v_to);
     }
 
     let from_uri = format!("store://{space}/{device}/{from_rel}");
@@ -632,7 +632,8 @@ fn walk(
             continue;
         }
         let path = ent.path();
-        if path.is_symlink() {
+        // Skip symlinks and Windows junctions / reparse points.
+        if super::fsutil::is_symlink_or_reparse(&path) {
             continue;
         }
         let rel = path

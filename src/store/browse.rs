@@ -255,7 +255,7 @@ pub fn recycle_restore(local: &Local, frame: &Frame) -> Result<Map<String, Value
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(io_err)?;
     }
-    fs::rename(&abs, &dest).map_err(io_err)?;
+    super::fsutil::rename_replace(&abs, &dest).map_err(io_err)?;
     prune_empty_recycle_dirs(local);
     Ok(Map::from_iter([("restored".into(), json!(origin_rel))]))
 }
@@ -296,7 +296,7 @@ pub fn move_to_recycle(
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(io_err)?;
     }
-    fs::rename(&full, &dest).map_err(io_err)?;
+    super::fsutil::rename_replace(&full, &dest).map_err(io_err)?;
     Ok(recycle_rel)
 }
 

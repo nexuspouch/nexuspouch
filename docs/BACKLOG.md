@@ -51,7 +51,7 @@
 | 项 | 状态 | 依赖 |
 |----|------|------|
 | Dart master 侧服务端：App 自己当 master（loopback）时 versions / handoff / 自定义空间的服务端逻辑 | **已决策（2026-08-02）：不实现**。master 服务端能力只归 Nexuspouch；PC 单独安装服务；ShePaw App 仅做客户端。手机作 master 时增强能力（版本/交接/自定义空间/语义检索）按降级语义不可用，协议客户端能力保留 | 无 |
-| Windows 节点支持（闲置 PC 当 master） | W1 进行中（`codex/windows-w1`：路径+CI+编译）；W2/W3 见 WINDOWS_SUPPORT.md | CI Windows runner |
+| Windows 节点支持（闲置 PC 当 master） | W1 已推（`codex/windows-w1`）；W2 进行中（`codex/windows-w2`：卷/rename/reparse/服务文档）；W3 见 WINDOWS_SUPPORT.md | CI Windows runner |
 | versions 保留策略管理页 / 发布产物可视化 | 待实现（低优先） | M2 |
 
 ## F. 运维 / QA

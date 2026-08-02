@@ -1,14 +1,14 @@
 # Windows 节点支持设计（Windows Support）
 
-> 状态：W1 进行中（2026-08-02，分支 `codex/windows-w1`）
+> 状态：W2 进行中（2026-08-02，分支 `codex/windows-w2`；W1 已合入 `codex/windows-w1`）
 > 决策：**支持 Windows 作为 Nexuspouch 节点的一等目标**——用闲置 PC
 > （主流用户为 Windows）当 master 是常见场景。
 > 范围：仅 Nexuspouch（Rust）节点服务；ShePaw App 桌面端（Flutter）与
 > channel（Go）本就跨平台。
 >
-> W1 已做：路径盘符/UNC/`\\?\`/`//server` 拒绝（双端 fixture）；
-> Windows 上 `reflink_copy` 直接降级；hardlink 测试去 Unix-only 断言；
-> `libc` 仅 unix 依赖；CI matrix 含 `windows-latest`。
+> W1：路径盘符/UNC/`\\?\`/`//server` 拒绝；reflink 降级；libc unix-only；CI Windows。
+> W2：`GetDiskFreeSpaceEx` 卷统计；reparse/symlink 拒绝；rename 替换+占用重试；
+> 服务化文档见 [windows/SERVICE.md](windows/SERVICE.md)。
 
 ## 1. 现状与缺口
 
@@ -38,12 +38,14 @@
 
 ### W2 完整特性
 
-- 符号链接纪律适配：reparse point 识别与拒绝；
-- 原子 rename 兼容 + 文件占用重试；
-- 卷统计：`volume.rs` 增加 Windows 实现（`GetDiskFreeSpaceEx`）；
-- 文件事件验证：notify（ReadDirectoryChangesW）在绑定目录摄取上跑通；
-- reflink：确认 NTFS 自动降级 copy，文档写明；
-- 服务化：Windows 服务安装脚本（NSSM/sc.exe）+ 日志落盘 + 开机自启文档。
+| 项 | 状态 |
+|----|------|
+| reparse / symlink 拒绝（`fsutil::is_symlink_or_reparse`） | ✅ commit 路径 + 绑定扫描跳过 |
+| rename 替换 + 占用重试（`fsutil::rename_replace`） | ✅ commit / archive / recycle / binding rename |
+| 卷统计 `GetDiskFreeSpaceEx` | ✅ `volume.rs`（windows-sys） |
+| reflink NTFS 降级 copy | ✅ W1 已确认 |
+| 服务化文档（NSSM / sc.exe / 防火墙） | ✅ [windows/SERVICE.md](windows/SERVICE.md) |
+| 文件事件 notify 在 Windows 绑定目录实测 | 待 CI/真机 |
 
 ### W3 打磨
 

@@ -137,7 +137,7 @@ pub fn archive_old(
 
     let file_path = vdir.join(&sha);
     if !file_path.exists() {
-        fs::rename(&full, &file_path).map_err(io_err)?;
+        super::fsutil::rename_replace(&full, &file_path).map_err(io_err)?;
     } else {
         // Same content already archived: drop the duplicate current copy.
         let _ = fs::remove_file(&full);

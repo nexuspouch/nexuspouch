@@ -2,6 +2,7 @@ pub mod browse;
 pub mod bindings;
 pub mod cursors;
 pub mod embed;
+pub mod fsutil;
 pub mod gc;
 pub mod handoff;
 pub mod index;
