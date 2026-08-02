@@ -128,6 +128,8 @@
 - 详情屏按适配层规范化渲染对话流（claude tool_use / codex function_call 折叠为 tool 块），
   版本回看（`@vN` 下拉切换）；
 - 搜索屏调 `/admin/api/sessions/search`（FTS5 默认，勾选「语义回忆」走 hybrid），结果直达详情；
+- 「绑定目录」屏零配置采集：Claude Code（`~/.claude/projects`）/ Codex
+  （`~/.codex/sessions`）预设一键绑定 + 立即同步，运行期新增绑定由 60s 周期扫描接管；
 - 界面保留"其他设备同步"（设备过滤）与"语义回忆"（semantic 开关）入口；
 - 验收：用户装好节点即看到全部历史会话并可搜索跳转（演示时刻）。
 

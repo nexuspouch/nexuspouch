@@ -192,6 +192,34 @@ impl BindingsRegistry {
         self.save(&g)?;
         Ok(binding)
     }
+
+    pub fn remove(&self, id: &str) -> Result<bool, String> {
+        let mut g = self.inner.lock().unwrap();
+        let before = g.bindings.len();
+        g.bindings.retain(|b| b.id != id);
+        if g.bindings.len() == before {
+            return Ok(false);
+        }
+        self.save(&g)?;
+        Ok(true)
+    }
+}
+
+/// Expand a leading `~/` using `$HOME` (admin UI convenience).
+pub fn expand_external(path: &str) -> String {
+    let p = path.trim();
+    if p == "~" {
+        return std::env::var("HOME").unwrap_or_else(|_| p.to_string());
+    }
+    if let Some(rest) = p.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return format!(
+                "{home}{}{rest}",
+                std::path::MAIN_SEPARATOR
+            );
+        }
+    }
+    p.to_string()
 }
 
 fn binding_dest_rel(b: &Binding, rel: &str) -> String {
@@ -849,6 +877,27 @@ mod tests {
 
     fn store_file(dir: &Path, rel: &str) -> PathBuf {
         dir.join(DEV).join("files").join(rel)
+    }
+
+    #[test]
+    fn expand_external_home() {
+        std::env::set_var("HOME", "/tmp/home-test");
+        let got = expand_external("~/foo");
+        assert!(got.contains("home-test"));
+        assert!(got.ends_with("foo"));
+        assert_eq!(expand_external("/abs/path"), "/abs/path");
+    }
+
+    #[test]
+    fn binding_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = BindingsRegistry::open(dir.path());
+        let b = registry
+            .add("t", dir.path().to_str().unwrap(), "sessions", "claude-code", "auto", vec![])
+            .unwrap();
+        assert!(registry.remove(&b.id).unwrap());
+        assert!(!registry.remove(&b.id).unwrap());
+        assert!(registry.list().is_empty());
     }
 
     #[test]

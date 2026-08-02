@@ -52,7 +52,9 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/spaces", get(spaces_list))
         .route("/spaces", post(spaces_declare))
         .route("/bindings", get(bindings_list))
+        .route("/bindings", post(bindings_add))
         .route("/bindings/sync", post(bindings_sync))
+        .route("/bindings/remove", post(bindings_remove))
         .route("/reprotect", post(reprotect))
         .route("/versions", get(versions_overview))
         .route("/sessions/overview", get(sessions_overview))
@@ -70,17 +72,13 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .with_state(state)
 }
 
-async fn ui_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
-    if !state.auth.authorize_headers(&headers, None) {
-        return unauthorized();
-    }
+/// HTML shells are always served so the browser can show the token form.
+/// `/admin/api/*` remains authenticated.
+async fn ui_page() -> Response {
     Html(ui::HTML).into_response()
 }
 
-async fn sessions_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
-    if !state.auth.authorize_headers(&headers, None) {
-        return unauthorized();
-    }
+async fn sessions_page() -> Response {
     Html(sessions_ui::HTML).into_response()
 }
 
@@ -552,8 +550,61 @@ async fn bindings_list(State(state): State<Arc<AdminState>>, headers: HeaderMap)
     auth_json(state, headers, None, handler::bindings_list).await
 }
 
+#[derive(Deserialize)]
+struct BindingsAddBody {
+    external: String,
+    /// Target space (sessions / files / artifacts).
+    space: String,
+    /// Destination folder under the space (e.g. `claude-code`).
+    folder: String,
+    mode: Option<String>,
+    label: Option<String>,
+    /// Sync immediately after add (default true).
+    #[serde(default = "default_true")]
+    sync: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+async fn bindings_add(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Json(body): Json<BindingsAddBody>,
+) -> Response {
+    auth_json_blocking(state, headers, move |s| {
+        handler::bindings_add(
+            s,
+            body.external,
+            body.space,
+            body.folder,
+            body.mode,
+            body.label,
+            body.sync,
+        )
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct BindingsRemoveBody {
+    id: String,
+}
+
+async fn bindings_remove(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Json(body): Json<BindingsRemoveBody>,
+) -> Response {
+    auth_json(state, headers, None, move |s| {
+        handler::bindings_remove(s, body.id)
+    })
+    .await
+}
+
 async fn bindings_sync(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
-    auth_json(state, headers, None, handler::bindings_sync).await
+    auth_json_blocking(state, headers, |s| handler::bindings_sync(s)).await
 }
 
 #[derive(Deserialize, Default)]

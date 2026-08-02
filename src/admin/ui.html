@@ -202,6 +202,10 @@ td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid
 <script>
 const $ = (id) => document.getElementById(id);
 const tokenKey = 'shepaw_admin_token';
+(function seedTokenFromQuery() {
+  const t = new URLSearchParams(location.search).get('token');
+  if (t) sessionStorage.setItem(tokenKey, t);
+})();
 $('token').value = sessionStorage.getItem(tokenKey) || '';
 $('saveToken').onclick = () => {
   sessionStorage.setItem(tokenKey, $('token').value.trim());

@@ -403,6 +403,76 @@ pub fn bindings_sync(state: &AdminState) -> Result<Map<String, Value>, OpError> 
     )]))
 }
 
+/// Add a directory binding and optionally sync it immediately.
+pub fn bindings_add(
+    state: &AdminState,
+    external: String,
+    space: String,
+    folder: String,
+    mode: Option<String>,
+    label: Option<String>,
+    sync_now: bool,
+) -> Result<Map<String, Value>, OpError> {
+    let external = crate::store::bindings::expand_external(&external);
+    if external.is_empty() {
+        return Err(OpError::new("bad_op", "external path required"));
+    }
+    let ext_path = std::path::Path::new(&external);
+    if !ext_path.is_dir() {
+        return Err(OpError::new(
+            "bad_path",
+            format!("external directory not found: {external}"),
+        ));
+    }
+    let space = space.trim();
+    let folder = folder.trim();
+    if space.is_empty() || folder.is_empty() {
+        return Err(OpError::new("bad_op", "space and folder required"));
+    }
+    let label = label
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("{folder}@admin"));
+    let mode = mode.unwrap_or_else(|| "auto".into());
+    let registry = crate::store::bindings::BindingsRegistry::open(&state.store.root);
+    let binding = registry
+        .add(&label, &external, space, folder, &mode, vec![])
+        .map_err(|e| OpError::new("bad_op", e))?;
+    let mut out = Map::from_iter([
+        ("ok".into(), json!(true)),
+        (
+            "binding".into(),
+            json!({
+                "id": binding.id,
+                "label": binding.label,
+                "external": binding.external,
+                "space": binding.space,
+                "folder": binding.folder,
+                "mode": binding.mode,
+            }),
+        ),
+    ]);
+    if sync_now {
+        let report = crate::store::bindings::sync_binding(&state.store, &binding);
+        out.insert("report".into(), report.to_json());
+    }
+    Ok(out)
+}
+
+pub fn bindings_remove(state: &AdminState, id: String) -> Result<Map<String, Value>, OpError> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(OpError::new("bad_op", "id required"));
+    }
+    let registry = crate::store::bindings::BindingsRegistry::open(&state.store.root);
+    let ok = registry
+        .remove(id)
+        .map_err(|e| OpError::new("internal", e))?;
+    Ok(Map::from_iter([
+        ("ok".into(), json!(ok)),
+        ("id".into(), json!(id)),
+    ]))
+}
+
 pub fn tokens_revoke(state: &AdminState, id: String) -> Result<Map<String, Value>, OpError> {
     let store = state
         .auth
