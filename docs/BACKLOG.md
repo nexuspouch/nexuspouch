@@ -100,7 +100,7 @@
 |----|------|------|
 | R1：检索评估集（共享 fixture）+ `recall eval` + Recall@K/MRR/nDCG + 召回参数化 | ✅（`docs/storage_fixtures/recall_eval.json`：16 会话/36 查询；`nexuspouch recall eval [--fixture][--k][--semantic\|--keyword][--json][--min-recall]`；指标+过滤器在 `store::recall_eval`/`SearchFilter`；agent/project/since_ms/until_ms 透出 HTTP/store 帧/MCP；`NEXUSPOUCH_RRF_K`/`NEXUSPOUCH_SEARCH_OVERFETCH` 可调。基线（hash embedder, hybrid, k=10）：R@1=R@5=R@10=MRR=nDCG=1.000；keyword 对照 R@10=0.444） | 设计文档 RECALL_ACCURACY_DESIGN.md |
 | R2：两阶段召回（粗召回 + 规则/小模型 rerank）+ 时间衰减 + 去重聚合 + 片段返回 | ✅（`store::rerank`：粗召回 → 规则 rerank（时间衰减+关键词加权）→ sessions 去重聚合 → ±N 片段；`SearchOptions{rerank,dedup,context_turns}` 透出 HTTP/帧/MCP/admin；env：`NEXUSPOUCH_RERANK`/`NEXUSPOUCH_SEARCH_COARSE`/`NEXUSPOUCH_TIME_DECAY_DAYS`。eval 关 dedup 以测 URI 级 R@K；hybrid+rerank 基线仍 R@*=1.000） | R1 |
-| R3：反馈闭环（点击/采纳/纠错事件）+ 定期回归 + 可选 A/B | 待实现 | R1/R2 |
+| R3：反馈闭环（点击/采纳/纠错事件）+ 定期回归 + 可选 A/B | ✅（`store::recall_feedback` → `.system/recall_feedback.jsonl` + EventBus `recall.feedback` + audit；HTTP `POST /admin/api/sessions/feedback`、store op / MCP `recall_feedback`；sessions UI 有用/不对 + 点击记 click；CLI：`recall feedback-export` / `recall regress` / `recall ab --preset rerank\|mode`） | R1/R2 |
 
 设计要点：准确性 = 评估闭环 + 混合检索 + 过滤与重排 + 会话特有策略
 （时间衰减/去重/片段化）+ 可追溯展示；先立基准再谈优化。

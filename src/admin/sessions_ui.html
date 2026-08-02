@@ -89,6 +89,19 @@ async function api(path, opts={}) {
   if (!res.ok) throw new Error(data.message || data.error || res.statusText);
   return data;
 }
+async function feedback(query, hit, rank, kind) {
+  return api('/admin/api/sessions/feedback', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      kind,
+      query,
+      uri: hit.uri,
+      rank,
+      score_type: hit.score_type || undefined,
+    }),
+  });
+}
 function esc(s) {
   return String(s == null ? '' : s)
     .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
@@ -446,11 +459,15 @@ async function showSearch(params) {
       results.appendChild(el('p', 'muted', '没有命中。换个说法试试，或先确认会话已入库。'));
       return;
     }
-    for (const h of hits) {
+    hits.forEach((h, i) => {
       const box = el('div', 'hit');
       const head = el('div');
       const link = el('a', 'title-link', h.path || h.uri);
       link.href = '#/s/' + encodeURIComponent(h.uri);
+      // Opening a hit counts as a weak positive signal (R3 click).
+      link.addEventListener('click', () => {
+        feedback(query, h, i + 1, 'click').catch(() => {});
+      });
       head.appendChild(link);
       head.appendChild(el('span', 'muted', ' · 设备 ' + shortId(h.device)));
       if (h.score_type) head.appendChild(el('span', 'badge', h.score_type));
@@ -470,8 +487,25 @@ async function showSearch(params) {
           .join('\n');
         box.appendChild(frag);
       }
+      const fb = el('div', 'row');
+      fb.style.marginTop = '0.35rem';
+      const mkBtn = (label, kind) => {
+        const b = el('button', null, label);
+        b.type = 'button';
+        b.style.fontSize = '0.8rem';
+        b.onclick = async () => {
+          try {
+            await feedback(query, h, i + 1, kind);
+            notice(kind === 'wrong' ? '已记录：结果不对' : '已记录：有用');
+          } catch (e) { setMsg(e); }
+        };
+        return b;
+      };
+      fb.appendChild(mkBtn('有用', 'adopt'));
+      fb.appendChild(mkBtn('不对', 'wrong'));
+      box.appendChild(fb);
       results.appendChild(box);
-    }
+    });
   } catch (e) { setMsg(e); }
 }
 

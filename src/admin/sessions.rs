@@ -239,6 +239,28 @@ pub fn detail(local: &Local, uri: &str) -> Result<Map<String, Value>, OpError> {
 /// Sessions-scoped proxy over `Local::search_query` (FTS5 keyword by default,
 /// FTS5+vector RRF hybrid when `semantic`). Optional R1 filters narrow by
 /// agent / project / mtime range.
+/// R3: record click / adopt / wrong for a sessions search hit.
+pub fn feedback(
+    local: &Local,
+    kind: &str,
+    query: &str,
+    uri: &str,
+    rank: Option<u32>,
+    note: Option<&str>,
+    score_type: Option<&str>,
+) -> Result<Map<String, Value>, OpError> {
+    local.record_recall_feedback(
+        kind,
+        query,
+        uri,
+        rank,
+        note,
+        score_type,
+        None,
+        Some("admin.sessions"),
+    )
+}
+
 pub fn search(
     local: &Local,
     q: &str,

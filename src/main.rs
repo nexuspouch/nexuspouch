@@ -89,7 +89,7 @@ enum Command {
     IndexRebuild,
     /// Sync all configured directory bindings once and print reports
     BindingsSync,
-    /// Recall accuracy tooling (R1): retrieval eval set + metrics
+    /// Recall accuracy tooling (R1–R3): eval / feedback / A/B
     Recall {
         #[command(subcommand)]
         action: RecallAction,
@@ -121,6 +121,61 @@ enum RecallAction {
         /// Fail (exit 1) when Recall@K drops below this gate
         #[arg(long)]
         min_recall: Option<f64>,
+    },
+    /// Periodic regression gate (alias of eval with default --min-recall 0.9).
+    Regress {
+        #[arg(long)]
+        fixture: Option<PathBuf>,
+        #[arg(long, default_value = "10")]
+        k: usize,
+        #[arg(long)]
+        keyword: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value = "0.9")]
+        min_recall: f64,
+    },
+    /// Export online feedback from `<root>/.system/recall_feedback.jsonl` (R3).
+    FeedbackExport {
+        #[arg(long)]
+        since_ms: Option<i64>,
+        #[arg(long)]
+        until_ms: Option<i64>,
+        /// Filter by kind: click|adopt|wrong
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Emit eval-candidate objects from positive feedback
+        #[arg(long)]
+        as_candidates: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Compare two recall configurations side-by-side (R3 A/B).
+    ///
+    /// Defaults to preset `rerank` (rules vs off). Override with --a/--b KEY=VAL
+    /// and/or --a-keyword/--b-keyword.
+    Ab {
+        #[arg(long)]
+        fixture: Option<PathBuf>,
+        #[arg(long, default_value = "10")]
+        k: usize,
+        /// Preset when --a/--b omitted: rerank | mode
+        #[arg(long, default_value = "rerank")]
+        preset: String,
+        /// Env override for side A (`KEY=VAL`, repeatable)
+        #[arg(long = "a")]
+        a_env: Vec<String>,
+        /// Env override for side B (`KEY=VAL`, repeatable)
+        #[arg(long = "b")]
+        b_env: Vec<String>,
+        #[arg(long)]
+        a_keyword: bool,
+        #[arg(long)]
+        b_keyword: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -244,14 +299,7 @@ fn cmd_bindings_sync(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn cmd_recall_eval(
-    fixture: Option<PathBuf>,
-    k: usize,
-    keyword: bool,
-    json_out: bool,
-    min_recall: Option<f64>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use nexuspouch::store::recall_eval as re;
+fn ensure_hermetic_embed() {
     // Hermetic default: the deterministic hash embedder unless the operator
     // explicitly chose one (NEXUSPOUCH_EMBED / NEXUSPOUCH_EMBED_URL), so eval
     // runs never trigger an ONNX model download.
@@ -260,6 +308,17 @@ fn cmd_recall_eval(
     {
         std::env::set_var("NEXUSPOUCH_EMBED", "hash");
     }
+}
+
+fn cmd_recall_eval(
+    fixture: Option<PathBuf>,
+    k: usize,
+    keyword: bool,
+    json_out: bool,
+    min_recall: Option<f64>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use nexuspouch::store::recall_eval as re;
+    ensure_hermetic_embed();
     let path = fixture.unwrap_or_else(re::default_fixture_path);
     let report = re::run_eval(&path, k, !keyword)?;
     if json_out {
@@ -274,6 +333,125 @@ fn cmd_recall_eval(
             report.zero_hit_queries, report.total_queries, report.k, report.recall_at_k, gate
         );
         std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn cmd_recall_feedback_export(
+    root: &std::path::Path,
+    since_ms: Option<i64>,
+    until_ms: Option<i64>,
+    kind: Option<String>,
+    limit: Option<usize>,
+    as_candidates: bool,
+    json_out: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use nexuspouch::store::recall_feedback as rf;
+    let entries = rf::list(
+        root,
+        &rf::FeedbackFilter {
+            since_ms,
+            until_ms,
+            kind,
+            limit,
+        },
+    )?;
+    if as_candidates {
+        let cands = rf::as_eval_candidates(&entries);
+        println!("{}", serde_json::to_string_pretty(&cands)?);
+        return Ok(());
+    }
+    let sum = rf::summary(&entries);
+    if json_out {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "summary": sum,
+                "entries": entries,
+            }))?
+        );
+    } else {
+        println!(
+            "recall feedback-export  root={}  total={}  +={}  -={}",
+            root.display(),
+            sum.get("total").and_then(|v| v.as_u64()).unwrap_or(0),
+            sum.get("positive").and_then(|v| v.as_u64()).unwrap_or(0),
+            sum.get("negative").and_then(|v| v.as_u64()).unwrap_or(0),
+        );
+        for e in &entries {
+            println!(
+                "  [{}] rank={:?} q={:?} uri={}",
+                e.kind, e.rank, e.query, e.uri
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cmd_recall_ab(
+    fixture: Option<PathBuf>,
+    k: usize,
+    preset: &str,
+    a_env: &[String],
+    b_env: &[String],
+    a_keyword: bool,
+    b_keyword: bool,
+    json_out: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use nexuspouch::store::recall_eval as re;
+    use nexuspouch::store::recall_feedback as rf;
+    ensure_hermetic_embed();
+    let path = fixture.unwrap_or_else(re::default_fixture_path);
+
+    let (mut label_a, mut env_a, mut sem_a, mut label_b, mut env_b, mut sem_b) = match preset {
+        "rerank" => (
+            "hybrid+rerank".to_string(),
+            vec![("NEXUSPOUCH_RERANK".into(), Some("rules".into()))],
+            true,
+            "hybrid+rerank_off".to_string(),
+            vec![("NEXUSPOUCH_RERANK".into(), Some("off".into()))],
+            true,
+        ),
+        "mode" => (
+            "hybrid".to_string(),
+            Vec::new(),
+            true,
+            "keyword".to_string(),
+            Vec::new(),
+            false,
+        ),
+        other => {
+            return Err(format!("unknown --preset {other} (use rerank|mode)").into());
+        }
+    };
+
+    if !a_env.is_empty() || !b_env.is_empty() {
+        env_a = rf::parse_env_pairs(a_env)?;
+        env_b = rf::parse_env_pairs(b_env)?;
+        label_a = if a_env.is_empty() {
+            label_a
+        } else {
+            format!("A({})", a_env.join(","))
+        };
+        label_b = if b_env.is_empty() {
+            label_b
+        } else {
+            format!("B({})", b_env.join(","))
+        };
+        sem_a = !a_keyword;
+        sem_b = !b_keyword;
+    } else if a_keyword || b_keyword {
+        sem_a = !a_keyword;
+        sem_b = !b_keyword;
+    }
+
+    let report = rf::AbReport::run(
+        &path, k, &label_a, &env_a, sem_a, &label_b, &env_b, sem_b,
+    )?;
+    if json_out {
+        println!("{}", serde_json::to_string_pretty(&report.to_json())?);
+    } else {
+        print!("{}", report.render_table());
     }
     Ok(())
 }
@@ -329,6 +507,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
         }) => {
             return cmd_recall_eval(fixture.clone(), *k, *keyword, *json, *min_recall);
+        }
+        Some(Command::Recall {
+            action:
+                RecallAction::Regress {
+                    fixture,
+                    k,
+                    keyword,
+                    json,
+                    min_recall,
+                },
+        }) => {
+            return cmd_recall_eval(
+                fixture.clone(),
+                *k,
+                *keyword,
+                *json,
+                Some(*min_recall),
+            );
+        }
+        Some(Command::Recall {
+            action:
+                RecallAction::FeedbackExport {
+                    since_ms,
+                    until_ms,
+                    kind,
+                    limit,
+                    as_candidates,
+                    json,
+                },
+        }) => {
+            return cmd_recall_feedback_export(
+                &args.root,
+                *since_ms,
+                *until_ms,
+                kind.clone(),
+                *limit,
+                *as_candidates,
+                *json,
+            );
+        }
+        Some(Command::Recall {
+            action:
+                RecallAction::Ab {
+                    fixture,
+                    k,
+                    preset,
+                    a_env,
+                    b_env,
+                    a_keyword,
+                    b_keyword,
+                    json,
+                },
+        }) => {
+            return cmd_recall_ab(
+                fixture.clone(),
+                *k,
+                preset,
+                a_env,
+                b_env,
+                *a_keyword,
+                *b_keyword,
+                *json,
+            );
         }
         None => {}
     }

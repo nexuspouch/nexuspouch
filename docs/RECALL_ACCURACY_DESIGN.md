@@ -39,8 +39,13 @@
 
 ### 1.3 在线反馈闭环（R3）
 
-- 打开/采纳结果 → 正样本；"结果不对" → 负样本；记入事件流/审计；
-- 定期回流评估与调参；可选 A/B（不同 embedding/rerank 配置）。
+- 打开/采纳结果 → 正样本；"结果不对" → 负样本；记入
+  `<root>/.system/recall_feedback.jsonl` + EventBus `recall.feedback` + 审计；
+- 透出：`POST /admin/api/sessions/feedback`、store op `recall.feedback`、
+  MCP `recall_feedback`；sessions UI「有用/不对」+ 打开记 `click`；
+- 定期回流：`nexuspouch recall feedback-export [--as-candidates]` 产出可审阅
+  eval 候选；`nexuspouch recall regress --min-recall 0.9` 做回归门禁；
+- 可选 A/B：`nexuspouch recall ab --preset rerank|mode`（或 `--a/--b KEY=VAL`）。
 
 ## 2. 召回管道质量（分层，按性价比排序）
 
@@ -82,7 +87,7 @@
 |------|------|------|
 | R1 | 评估集 + `recall eval` + Recall@K/MRR/nDCG + 召回参数化（top_k/filter/权重） | ✅ 已落地（2026-08-02） |
 | R2 | 两阶段召回（粗召回 + 规则/小模型 rerank）+ 时间衰减 + 去重聚合 + 片段返回 | ✅ 已落地（2026-08-02；规则 v1；可选小模型/远程仍待） |
-| R3 | 反馈闭环（点击/采纳/纠错事件）+ 定期回归 + 可选 A/B | 1 周 |
+| R3 | 反馈闭环（点击/采纳/纠错事件）+ 定期回归 + 可选 A/B | ✅ 已落地（2026-08-02） |
 
 ## 5. 与现有能力的关系
 
@@ -94,7 +99,7 @@
   `NEXUSPOUCH_RERANK` / `NEXUSPOUCH_SEARCH_COARSE` / `NEXUSPOUCH_TIME_DECAY_DAYS`）；
 - **P1.5 整合**：`/admin/sessions` 搜索屏与 `/admin/api/sessions/search` 透出同一
   `SearchFilter` + R2 去重/片段（agent / project / 日期范围 + semantic hybrid）；
-- 反馈事件走现有 EventBus / 审计链路（R3）。
+- 反馈事件走独立 jsonl + EventBus / 审计链路（R3 已落地）。
 
 ## 6. 风险与对策
 

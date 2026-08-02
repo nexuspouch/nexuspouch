@@ -378,6 +378,21 @@ impl McpServer {
                     }
                 },
                 {
+                    "name": "recall_feedback",
+                    "description": "R3: record online recall feedback. kind=click|adopt (positive) or wrong (negative). Used to calibrate eval sets over time.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"type": "string", "enum": ["click", "adopt", "wrong"]},
+                            "query": {"type": "string"},
+                            "uri": {"type": "string"},
+                            "rank": {"type": "integer"},
+                            "note": {"type": "string"}
+                        },
+                        "required": ["kind", "query", "uri"]
+                    }
+                },
+                {
                     "name": "store_space",
                     "description": "Report space usage: per-device/space bytes, staging, recycle, volume free/warn.",
                     "inputSchema": {"type": "object", "properties": {}}
@@ -401,6 +416,7 @@ impl McpServer {
             "store_search" => self.store_search(&args),
             "store_watch" => self.store_watch(&args),
             "session_recall" => self.session_recall(&args),
+            "recall_feedback" => self.recall_feedback(&args),
             "store_space" => self.store_space(&args),
             _ => return Err(invalid_params(format!("unknown tool: {name}"))),
         };
@@ -663,6 +679,22 @@ impl McpServer {
         Ok(out)
     }
 
+    fn recall_feedback(&self, args: &Value) -> Result<Value, RpcError> {
+        let kind = str_arg(args, "kind")?;
+        let query = args
+            .get("query")
+            .or_else(|| args.get("q"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| invalid_params("missing or invalid argument: query"))?;
+        let uri = str_arg(args, "uri")?;
+        let rank = args.get("rank").and_then(|v| v.as_u64()).map(|n| n as u32);
+        let note = str_arg_opt(args, "note");
+        self.client
+            .recall_feedback(kind, query, uri, rank, note)
+            .map_err(map_store_err)
+    }
+
     fn store_watch(&self, args: &Value) -> Result<Value, RpcError> {
         let prefix = str_arg_opt(args, "prefix");
         let out = self.client.recent_events(100).map_err(map_store_err)?;
@@ -866,12 +898,12 @@ mod tests {
 
         let list = rpc(&server, 2, "tools/list", json!({}));
         let tools = list["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 9);
+        assert_eq!(tools.len(), 10);
         let names: Vec<&str> = tools
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        for want in ["store_write", "store_read", "store_read_chunk", "store_meta", "store_list", "store_search", "store_watch", "store_space"] {
+        for want in ["store_write", "store_read", "store_read_chunk", "store_meta", "store_list", "store_search", "store_watch", "session_recall", "recall_feedback", "store_space"] {
             assert!(names.contains(&want), "missing tool {want}");
         }
     }

@@ -12,6 +12,7 @@ pub mod manifest;
 pub mod master;
 pub mod migrate_seed;
 pub mod recall_eval;
+pub mod recall_feedback;
 pub mod reprotect;
 pub mod retention;
 pub mod rerank;
@@ -356,6 +357,7 @@ impl Local {
             "delete" => browse::delete(self, &frame, caller),
             "stats" => browse::stats(self),
             "search" => self.op_search(&frame),
+            "recall.feedback" => self.op_recall_feedback(&frame),
             "events.list" => self.op_events_list(&frame),
             "recycle.list" => browse::recycle_list(self),
             "recycle.restore" => browse::recycle_restore(self, &frame),
@@ -888,6 +890,121 @@ impl Local {
             semantic,
             filter.as_ref(),
             &opts,
+        )
+    }
+
+    /// R3: record click / adopt / wrong against a search hit.
+    pub fn record_recall_feedback(
+        &self,
+        kind: &str,
+        query: &str,
+        uri: &str,
+        rank: Option<u32>,
+        note: Option<&str>,
+        score_type: Option<&str>,
+        agent_id: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<Map<String, Value>, OpError> {
+        let (kind, query, uri, note) =
+            recall_feedback::validate_request(kind, query, uri, note)
+                .map_err(|e| OpError::new("bad_op", e))?;
+        let space = crate::uri::parse(&uri).ok().map(|u| u.space);
+        let entry = recall_feedback::FeedbackEntry {
+            id: recall_feedback::new_id(),
+            ts_ms: recall_feedback::now_ms(),
+            kind: kind.clone(),
+            query: query.clone(),
+            uri: uri.clone(),
+            rank,
+            note: note.clone(),
+            space: space.clone(),
+            score_type: score_type.map(str::to_string),
+            agent_id: agent_id.map(str::to_string),
+            device: Some(self.device_id.clone()),
+            source: source.map(str::to_string),
+        };
+        recall_feedback::append(&self.root, &entry)
+            .map_err(|e| OpError::new("io_error", e))?;
+
+        let mut detail = Map::new();
+        detail.insert("kind".into(), json!(kind));
+        detail.insert("query".into(), json!(query));
+        if let Some(r) = rank {
+            detail.insert("rank".into(), json!(r));
+        }
+        if let Some(ref n) = note {
+            detail.insert("note".into(), json!(n));
+        }
+        if let Some(st) = score_type {
+            detail.insert("score_type".into(), json!(st));
+        }
+        let mut ev = crate::events::StoreEvent::new("recall.feedback", &self.device_id)
+            .with_uri(&uri)
+            .with_detail(detail);
+        if let Some(sp) = space {
+            ev.space = Some(sp);
+        }
+        if let Some(a) = agent_id {
+            ev = ev.with_agent(a);
+        }
+        self.emit_event(ev);
+        self.audit_action(
+            "recall.feedback",
+            agent_id.unwrap_or("local"),
+            "recall.feedback",
+            &format!("{kind} rank={:?} uri={uri}", rank),
+        );
+
+        Ok(Map::from_iter([
+            ("ok".into(), json!(true)),
+            ("id".into(), json!(entry.id)),
+            ("ts_ms".into(), json!(entry.ts_ms)),
+            ("kind".into(), json!(entry.kind)),
+            ("query".into(), json!(entry.query)),
+            ("uri".into(), json!(entry.uri)),
+            ("rank".into(), json!(entry.rank)),
+        ]))
+    }
+
+    fn op_recall_feedback(&self, frame: &Frame) -> Result<Map<String, Value>, OpError> {
+        let kind = frame
+            .payload
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let query = frame
+            .payload
+            .get("query")
+            .or_else(|| frame.payload.get("q"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let uri = frame
+            .payload
+            .get("uri")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let rank = frame
+            .payload
+            .get("rank")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32);
+        let note = frame.payload.get("note").and_then(|v| v.as_str());
+        let score_type = frame.payload.get("score_type").and_then(|v| v.as_str());
+        let agent_id = frame.payload.get("agent_id").and_then(|v| v.as_str());
+        let source = frame
+            .payload
+            .get("source")
+            .and_then(|v| v.as_str())
+            .or(Some("store"));
+        self.record_recall_feedback(
+            kind,
+            query,
+            uri,
+            rank,
+            note,
+            score_type,
+            agent_id,
+            source,
         )
     }
 
@@ -1512,5 +1629,34 @@ mod tests {
             )
             .unwrap();
         assert_eq!(out["total"], 0);
+    }
+
+    #[test]
+    fn recall_feedback_frame_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let device = "aaaaaaaaaaaaaaaa";
+        let store = Local::open(dir.path(), device).unwrap();
+        let mut p = Map::new();
+        p.insert("kind".into(), json!("adopt"));
+        p.insert("query".into(), json!("deploy"));
+        p.insert(
+            "uri".into(),
+            json!(format!("store://sessions/{device}/claude/p/s.jsonl")),
+        );
+        p.insert("rank".into(), json!(1));
+        let out = store
+            .handle(
+                Frame::from_parts("recall.feedback", p),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap();
+        assert_eq!(out["ok"], true);
+        assert_eq!(out["kind"], "adopt");
+        let entries = recall_feedback::list(dir.path(), &recall_feedback::FeedbackFilter::default())
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, "adopt");
     }
 }

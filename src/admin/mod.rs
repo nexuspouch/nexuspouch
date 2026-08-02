@@ -58,6 +58,7 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/sessions/overview", get(sessions_overview))
         .route("/sessions/detail", get(sessions_detail))
         .route("/sessions/search", get(sessions_search))
+        .route("/sessions/feedback", post(sessions_feedback))
         .with_state(state.clone());
 
     Router::new()
@@ -513,6 +514,35 @@ async fn sessions_search(
             q.semantic,
             filter.as_ref(),
             &opts,
+        )
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct SessionsFeedbackBody {
+    kind: String,
+    query: String,
+    uri: String,
+    rank: Option<u32>,
+    note: Option<String>,
+    score_type: Option<String>,
+}
+
+async fn sessions_feedback(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Json(body): Json<SessionsFeedbackBody>,
+) -> Response {
+    auth_json_blocking(state, headers, move |s| {
+        sessions::feedback(
+            &s.store,
+            &body.kind,
+            &body.query,
+            &body.uri,
+            body.rank,
+            body.note.as_deref(),
+            body.score_type.as_deref(),
         )
     })
     .await

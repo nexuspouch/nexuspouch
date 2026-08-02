@@ -225,7 +225,9 @@ pub fn check_acl_with(
                 AclVerdict::DenyAcl
             }
         }
-        "stats" | "space.list" | "search" | "events.list" => AclVerdict::Allow,
+        "stats" | "space.list" | "search" | "recall.feedback" | "events.list" => {
+            AclVerdict::Allow
+        }
         "space.declare" => {
             if loopback {
                 AclVerdict::Allow

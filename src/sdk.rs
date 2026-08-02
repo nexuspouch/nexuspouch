@@ -178,6 +178,29 @@ impl Client {
         self.get_json(&url)
     }
 
+    /// R3: record recall feedback (`click` / `adopt` / `wrong`) via store op.
+    pub fn recall_feedback(
+        &self,
+        kind: &str,
+        query: &str,
+        uri: &str,
+        rank: Option<u32>,
+        note: Option<&str>,
+    ) -> Result<Value, String> {
+        let mut payload = Map::new();
+        payload.insert("kind".into(), json!(kind));
+        payload.insert("query".into(), json!(query));
+        payload.insert("uri".into(), json!(uri));
+        if let Some(r) = rank {
+            payload.insert("rank".into(), json!(r));
+        }
+        if let Some(n) = note {
+            payload.insert("note".into(), json!(n));
+        }
+        payload.insert("source".into(), json!("sdk"));
+        self.store_op("recall.feedback", payload)
+    }
+
     /// POST /api/v1/store frame. Returns the `data` object on success, or
     /// an Err carrying the store error code + message on `{"op":"error"}`.
     pub fn store_op(&self, op: &str, payload: Map<String, Value>) -> Result<Value, String> {

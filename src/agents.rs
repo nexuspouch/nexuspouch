@@ -227,6 +227,7 @@ fn scope_allows(scopes: &[String], op: &str, space: &str) -> bool {
             | "manifest"
             | "artifact.state"
             | "search"
+            | "recall.feedback"
             | "stats"
     );
     if read {
