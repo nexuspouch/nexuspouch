@@ -1,8 +1,9 @@
-//! Vector index (VECTOR_SEARCH_DESIGN.md P1).
+//! Vector index (VECTOR_SEARCH_DESIGN.md P1/P3).
 //!
 //! SQLite table at `<root>/.system/vector/embeddings.db`:
 //! `embeddings(uri, chunk_index, embedding BLOB, model, created_ms)`.
-//! Small-scale brute-force cosine; HNSW deferred to P3.
+//! Small-scale brute-force cosine; HNSW deferred until scale warrants it
+//! (see VECTOR_SEARCH_DESIGN §5.1).
 
 use super::embed::{self, Embedder};
 use rusqlite::{params, Connection};
@@ -77,6 +78,47 @@ impl VectorIndex {
             return;
         };
         let _ = conn.execute("DELETE FROM embeddings WHERE uri = ?1", params![uri]);
+    }
+
+    /// Drop all embeddings (used by full index rebuild / model migration).
+    pub fn clear(&self) {
+        let Ok(mut guard) = self.conn.lock() else {
+            return;
+        };
+        let Some(conn) = guard.as_mut() else {
+            return;
+        };
+        let _ = conn.execute("DELETE FROM embeddings", []);
+    }
+
+    /// Rows whose `model` differs from the current embedder (need re-embed).
+    pub fn stale_count(&self) -> usize {
+        let Ok(guard) = self.conn.lock() else {
+            return 0;
+        };
+        let Some(conn) = guard.as_ref() else {
+            return 0;
+        };
+        let name = self.embedder.name();
+        conn.query_row(
+            "SELECT COUNT(*) FROM embeddings WHERE model != ?1",
+            params![name],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n as usize)
+        .unwrap_or(0)
+    }
+
+    pub fn total_count(&self) -> usize {
+        let Ok(guard) = self.conn.lock() else {
+            return 0;
+        };
+        let Some(conn) = guard.as_ref() else {
+            return 0;
+        };
+        conn.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get::<_, i64>(0))
+            .map(|n| n as usize)
+            .unwrap_or(0)
     }
 
     /// Brute-force cosine over stored vectors. Returns JSON hit objects with score.

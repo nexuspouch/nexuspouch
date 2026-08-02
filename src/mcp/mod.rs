@@ -234,7 +234,7 @@ impl McpServer {
                 },
                 {
                     "name": "store_search",
-                    "description": "Search artifacts/files (FTS5 keyword; set semantic=true for vector recall with keyword fallback).",
+                    "description": "Search artifacts/files (FTS5 keyword; semantic=true runs FTS5+vector RRF hybrid, degrades to keyword if vectors unavailable).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {

@@ -85,7 +85,7 @@ enum Command {
         #[arg(long)]
         agent: String,
     },
-    /// Rebuild the SQLite FTS5 search index from the store tree
+    /// Rebuild FTS5 + vector embeddings from the store tree
     IndexRebuild,
     /// Sync all configured directory bindings once and print reports
     BindingsSync,
@@ -188,8 +188,13 @@ async fn cmd_mcp(args: &Args, agent: Option<String>) -> Result<(), Box<dyn std::
 fn cmd_index_rebuild(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let (_, device) = load_identity_device(args)?;
     let store = Local::open(&args.root, &device)?;
+    let stale = store.vector_stale_count();
     let indexed = store.rebuild_index()?;
-    println!("indexed {indexed} files");
+    println!(
+        "indexed {indexed} files; vectors={} embedder={} (stale_before={stale})",
+        store.vector_total_count(),
+        store.embedder_name()
+    );
     Ok(())
 }
 

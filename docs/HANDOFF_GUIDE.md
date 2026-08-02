@@ -101,5 +101,5 @@
    余 rename/FFI/App watcher、网关注入仍待；
 4. **P3（需决策）**：E——Dart master 服务端、Windows；
 5. **P4（不承诺）**：A、G——空间配额、快照薄层（先讨论后投入）；
-6. **新方向**：H——P1+P2 在 `codex/vector-p1`（ONNX bge-small-zh 默认 +
-   hash 回退 + semantic 降级 + `memory` 空间）；RRF 混合仍待。
+6. **新方向**：H——P1–P3 在 `codex/vector-p1`（ONNX 默认 + RRF hybrid +
+   `memory` + index-rebuild 重嵌入；HNSW 暂缓）。

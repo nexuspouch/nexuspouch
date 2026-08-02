@@ -14,6 +14,7 @@ pub mod reprotect;
 pub mod retention;
 pub mod snapshot_crypto;
 pub mod spaces;
+pub mod rrf;
 pub mod vector;
 pub mod versions;
 pub mod volume;
@@ -117,6 +118,14 @@ impl Local {
         };
         // Well-known memory space for distilled agent recall (vector P2).
         let _ = local.spaces.ensure_memory();
+        let stale = local.vector.stale_count();
+        if stale > 0 {
+            tracing::warn!(
+                stale,
+                embedder = %local.vector.embedder_name(),
+                "stale embeddings (model mismatch); run `nexuspouch index-rebuild` to re-embed"
+            );
+        }
         let ptr_path = local.pointer_path();
         if !ptr_path.exists() {
             local.save_pointer(&MasterPointer {
@@ -379,8 +388,11 @@ impl Local {
             .map_err(|e| OpError::new("internal", e))
     }
 
-    /// Keyword and/or semantic search. When `semantic` and the embedder is
-    /// unavailable / empty, falls back to FTS5 with `degraded: true`.
+    /// Keyword and/or semantic search.
+    ///
+    /// When `semantic` is true: FTS5 + vector RRF hybrid (`score_type: hybrid`).
+    /// Vector unavailable → FTS5 with `degraded: true`. Only one side hits →
+    /// that side's `score_type` (`keyword` / `vector`).
     pub fn search_query(
         &self,
         q: &str,
@@ -390,39 +402,119 @@ impl Local {
         limit: usize,
         semantic: bool,
     ) -> Result<Map<String, Value>, OpError> {
-        if semantic {
-            match self.vector.search(q, space, device, limit) {
-                Ok(results) if !results.is_empty() => {
-                    return Ok(Map::from_iter([
-                        ("query".into(), json!(q)),
-                        ("total".into(), json!(results.len())),
-                        ("results".into(), json!(results)),
-                        ("score_type".into(), json!("vector")),
-                        ("degraded".into(), json!(false)),
-                        ("embedder".into(), json!(self.vector.embedder_name())),
-                    ]));
+        let limit = limit.clamp(1, 200);
+        if !semantic {
+            let results = self.search_index(q, space, device, state, limit)?;
+            return Ok(Map::from_iter([
+                ("query".into(), json!(q)),
+                ("total".into(), json!(results.len())),
+                ("results".into(), json!(results)),
+                ("score_type".into(), json!("keyword")),
+                ("degraded".into(), json!(false)),
+            ]));
+        }
+
+        let overfetch = (limit * 3).clamp(limit, 200);
+        let keyword = self.search_index(q, space, device, state, overfetch)?;
+        let vector_res = if self.vector.available() {
+            self.vector.search(q, space, device, overfetch)
+        } else {
+            Err("vector_unavailable".into())
+        };
+
+        match vector_res {
+            Err(_) => Ok(Map::from_iter([
+                ("query".into(), json!(q)),
+                ("total".into(), json!(keyword.len().min(limit))),
+                (
+                    "results".into(),
+                    json!(keyword.into_iter().take(limit).collect::<Vec<_>>()),
+                ),
+                ("score_type".into(), json!("keyword")),
+                ("degraded".into(), json!(true)),
+                ("embedder".into(), json!(self.vector.embedder_name())),
+            ])),
+            Ok(vector) if vector.is_empty() && keyword.is_empty() => Ok(Map::from_iter([
+                ("query".into(), json!(q)),
+                ("total".into(), json!(0)),
+                ("results".into(), json!([])),
+                ("score_type".into(), json!("hybrid")),
+                ("degraded".into(), json!(false)),
+                ("embedder".into(), json!(self.vector.embedder_name())),
+            ])),
+            Ok(vector) if vector.is_empty() => Ok(Map::from_iter([
+                ("query".into(), json!(q)),
+                ("total".into(), json!(keyword.len().min(limit))),
+                (
+                    "results".into(),
+                    json!(keyword.into_iter().take(limit).collect::<Vec<_>>()),
+                ),
+                ("score_type".into(), json!("keyword")),
+                ("degraded".into(), json!(false)),
+                ("embedder".into(), json!(self.vector.embedder_name())),
+            ])),
+            Ok(vector) if keyword.is_empty() => Ok(Map::from_iter([
+                ("query".into(), json!(q)),
+                ("total".into(), json!(vector.len().min(limit))),
+                (
+                    "results".into(),
+                    json!(vector.into_iter().take(limit).collect::<Vec<_>>()),
+                ),
+                ("score_type".into(), json!("vector")),
+                ("degraded".into(), json!(false)),
+                ("embedder".into(), json!(self.vector.embedder_name())),
+            ])),
+            Ok(vector) => {
+                let kw_uris: Vec<String> = keyword
+                    .iter()
+                    .filter_map(|h| h.get("uri").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                    .collect();
+                let vec_uris: Vec<String> = vector
+                    .iter()
+                    .filter_map(|h| h.get("uri").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                    .collect();
+                let fused = rrf::fuse(&[&kw_uris, &vec_uris], rrf::DEFAULT_K);
+                let kw_by_uri: HashMap<&str, &Value> = keyword
+                    .iter()
+                    .filter_map(|h| h.get("uri").and_then(|v| v.as_str()).map(|u| (u, h)))
+                    .collect();
+                let vec_by_uri: HashMap<&str, &Value> = vector
+                    .iter()
+                    .filter_map(|h| h.get("uri").and_then(|v| v.as_str()).map(|u| (u, h)))
+                    .collect();
+                let mut results = Vec::new();
+                for (uri, score) in fused.into_iter().take(limit) {
+                    let mut hit = if let Some(h) = kw_by_uri.get(uri.as_str()) {
+                        (*h).clone()
+                    } else if let Some(h) = vec_by_uri.get(uri.as_str()) {
+                        (*h).clone()
+                    } else {
+                        continue;
+                    };
+                    if let Some(obj) = hit.as_object_mut() {
+                        obj.insert("score".into(), json!(score));
+                        obj.insert("score_type".into(), json!("hybrid"));
+                        obj.insert(
+                            "rank_keyword".into(),
+                            json!(kw_uris.iter().position(|u| u == &uri).map(|i| i + 1)),
+                        );
+                        obj.insert(
+                            "rank_vector".into(),
+                            json!(vec_uris.iter().position(|u| u == &uri).map(|i| i + 1)),
+                        );
+                    }
+                    results.push(hit);
                 }
-                Ok(_) | Err(_) => {
-                    let results = self.search_index(q, space, device, state, limit)?;
-                    return Ok(Map::from_iter([
-                        ("query".into(), json!(q)),
-                        ("total".into(), json!(results.len())),
-                        ("results".into(), json!(results)),
-                        ("score_type".into(), json!("keyword")),
-                        ("degraded".into(), json!(true)),
-                        ("embedder".into(), json!(self.vector.embedder_name())),
-                    ]));
-                }
+                Ok(Map::from_iter([
+                    ("query".into(), json!(q)),
+                    ("total".into(), json!(results.len())),
+                    ("results".into(), json!(results)),
+                    ("score_type".into(), json!("hybrid")),
+                    ("degraded".into(), json!(false)),
+                    ("embedder".into(), json!(self.vector.embedder_name())),
+                ]))
             }
         }
-        let results = self.search_index(q, space, device, state, limit)?;
-        Ok(Map::from_iter([
-            ("query".into(), json!(q)),
-            ("total".into(), json!(results.len())),
-            ("results".into(), json!(results)),
-            ("score_type".into(), json!("keyword")),
-            ("degraded".into(), json!(false)),
-        ]))
     }
 
     fn op_search(&self, frame: &Frame) -> Result<Map<String, Value>, OpError> {
@@ -504,10 +596,30 @@ impl Local {
         ]))
     }
 
+    /// Rebuild FTS5 + vector embeddings from the live tree (re-embed strategy).
     pub fn rebuild_index(&self) -> Result<usize, OpError> {
         self.index
-            .rebuild(self)
-            .map_err(|e| OpError::new("internal", e))
+            .clear()
+            .map_err(|e| OpError::new("internal", e))?;
+        self.vector.clear();
+        let mut count = 0usize;
+        for e in self.index.scan_tree(self) {
+            self.index_file(&e);
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    pub fn vector_stale_count(&self) -> usize {
+        self.vector.stale_count()
+    }
+
+    pub fn vector_total_count(&self) -> usize {
+        self.vector.total_count()
+    }
+
+    pub fn embedder_name(&self) -> String {
+        self.vector.embedder_name()
     }
 
     pub fn is_known_space(&self, name: &str) -> bool {
@@ -926,5 +1038,52 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(err.code, "bad_op");
+    }
+
+    #[test]
+    fn semantic_search_uses_rrf_hybrid() {
+        // cfg(test) embedder defaults to local-hash-v0 (no ONNX download).
+        let dir = tempfile::tempdir().unwrap();
+        let device = "bbbbbbbbbbbbbbbb";
+        let store = Local::open(dir.path(), device).unwrap();
+
+        store.index_file(&index::IndexEntry {
+            uri: format!("store://artifacts/{device}/t/exact.md"),
+            space: "artifacts".into(),
+            device: device.into(),
+            path: "t/exact.md".into(),
+            sha256: "b".repeat(64),
+            size: 20,
+            mtime: 0,
+            task: "t".into(),
+            state: "committed".into(),
+            summary: Some("quarterly revenue report".into()),
+            body: "zebra99 revenue grew twenty percent".into(),
+        });
+        store.index_file(&index::IndexEntry {
+            uri: format!("store://artifacts/{device}/t/sem.md"),
+            space: "artifacts".into(),
+            device: device.into(),
+            path: "t/sem.md".into(),
+            sha256: "c".repeat(64),
+            size: 20,
+            mtime: 0,
+            task: "t".into(),
+            state: "committed".into(),
+            summary: Some("financial growth summary".into()),
+            body: "sales increased significantly this quarter".into(),
+        });
+
+        // FTS uses phrase MATCH — keep q as a token present in the body.
+        let out = store
+            .search_query("zebra99", Some("artifacts"), None, None, 10, true)
+            .unwrap();
+        assert_eq!(out["score_type"], "hybrid");
+        assert_eq!(out["degraded"], false);
+        assert!(out["total"].as_u64().unwrap() >= 1);
+        let results = out["results"].as_array().unwrap();
+        assert_eq!(results[0]["score_type"], "hybrid");
+        assert!(results[0].get("rank_keyword").is_some());
+        assert!(results[0].get("rank_vector").is_some());
     }
 }

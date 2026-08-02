@@ -325,9 +325,13 @@ pub fn agents_reset_quota(state: &AdminState, id: String) -> Result<Map<String, 
 }
 
 pub fn index_rebuild(state: &AdminState) -> Result<Map<String, Value>, OpError> {
+    let stale_before = state.store.vector_stale_count();
     let indexed = state.store.rebuild_index()?;
     Ok(Map::from_iter([
         ("indexed".into(), json!(indexed)),
+        ("vectors".into(), json!(state.store.vector_total_count())),
+        ("stale_before".into(), json!(stale_before)),
+        ("embedder".into(), json!(state.store.embedder_name())),
         ("ok".into(), json!(true)),
     ]))
 }

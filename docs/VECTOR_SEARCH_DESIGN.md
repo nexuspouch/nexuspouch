@@ -1,11 +1,12 @@
 # 向量搜索设计（Vector Search）
 
-> 状态：P1 本地 ONNX 已落地（2026-08-02，分支 `codex/vector-p1`）
+> 状态：P1–P3 已落地（2026-08-02，分支 `codex/vector-p1`）
 > 核心决策：**向量能力绑定 master（常开 PC/NAS）**；手机只做客户端查询，
 > 不在移动端保存模型/索引/embedding。默认本地 embedding，远程 API 仅显式可选。
 >
-> P1 实现备注：默认 embedder 为 `local-onnx:BGESmallZHV15`（fastembed/ort，
-> 首次可下载模型；失败回退 `local-hash-v0`）。`NEXUSPOUCH_EMBED=hash` 强制哈希；
+> 实现备注：默认 embedder 为 `local-onnx:BGESmallZHV15`（fastembed/ort，
+> 首次可下载模型；失败回退 `local-hash-v0`）。`semantic=true` → FTS5+向量
+> RRF 混合（`score_type: hybrid`）。`NEXUSPOUCH_EMBED=hash` 强制哈希；
 > `NEXUSPOUCH_EMBED_URL` 走远程；`NEXUSPOUCH_EMBED=off` 强制降级 FTS5。
 > Cargo feature `onnx`（default）可 `--no-default-features` 关闭。
 
@@ -93,24 +94,46 @@ trait Embedder {
 - 检索：`store_search(semantic: true, space: memory)` /
   帧 `search` 同参。
 
-## 5. 混合检索（P3）
+## 5. 混合检索（P3）— 已落地
 
-- FTS5 + 向量 RRF 融合排序；`space/device/state` 过滤沿用；
-- 响应标注 `score_type: keyword|vector|hybrid` 与 `degraded` 标志。
+- `semantic=true`：两侧各 overfetch（`limit×3`，上限 200），RRF（`k=60`）融合；
+- `space/device/state`：keyword 侧完整过滤；vector 侧过滤 space/device；
+- 响应顶层与命中均可带 `score_type: keyword|vector|hybrid`；`degraded: true`
+  仅当向量不可用而回退 keyword；
+- 命中可含 `rank_keyword` / `rank_vector`（1-based，缺侧为 null）。
+
+### 5.1 重嵌入策略
+
+| 触发 | 行为 |
+|------|------|
+| 内容变更 | commit / `index_file` 钩子对 uri 重算 embedding |
+| 模型变更 | 行上 `model` ≠ 当前 embedder → stale；启动 warn；`nexuspouch index-rebuild` / admin `/index/rebuild` 清空并重建 FTS+向量 |
+| 离线目录模型 | `NEXUSPOUCH_EMBED_MODEL_DIR` 切换后同样走 rebuild |
+
+### 5.2 规模评估（HNSW）
+
+| 规模（embedding 行） | 策略 | 决策 |
+|---------------------|------|------|
+| ≤ ~10⁵ | SQLite 暴力余弦（现状） | **保持**；主路径延迟可接受 |
+| ~10⁵–10⁶ | 仍可暴力；可加 space 分区扫描 / 预过滤 | 观察；未达瓶颈不引入依赖 |
+| \> ~10⁶ 或 P95 查询 > 100ms | 评估 sqlite-vec / 外部 HNSW | **延期**；需独立里程碑与迁移 |
+
+结论（2026-08）：个人/小团队 master 体量远低于 10⁵，**不上 HNSW**；重建走
+`index-rebuild` 即可。
 
 ## 6. 里程碑
 
-| 阶段 | 内容 | 预估 |
+| 阶段 | 内容 | 状态 |
 |------|------|------|
-| P1 | embedder 抽象（本地默认）+ embeddings 表 + 帧/HTTP/MCP `semantic` 查询 + 降级语义 | 1-2 周 |
-| P2 | `memory` 空间 profile + 蒸馏记忆约定 + 管理页展示 | 1 周 |
-| P3 | RRF 混合排序 + 重嵌入策略 + 规模评估（是否上 HNSW） | 1 周 |
+| P1 | embedder 抽象（本地默认）+ embeddings 表 + 帧/HTTP/MCP `semantic` + 降级 | ✅ |
+| P2 | `memory` 空间 profile + 蒸馏记忆约定 + 管理页展示 | ✅ |
+| P3 | RRF 混合 + 重嵌入 + 规模评估（暂缓 HNSW） | ✅ |
 
 ## 7. 风险与对策
 
 | 风险 | 对策 |
 |------|------|
-| 模型下载/依赖 | 首次按需下载；失败退 keyword-only |
+| 模型下载/依赖 | 首次按需下载 / `MODEL_DIR`；失败退 keyword-only |
 | 隐私（远程 provider） | 默认本地；远程显式开启并明示 |
 | 手机作 master | 文档化 + `degraded` 标志回退 |
-| 规模增长 | 100 万条内暴力余弦；更大上 HNSW |
+| 规模增长 | 见 §5.2；当前暴力余弦 |

@@ -188,22 +188,43 @@ impl SearchIndex {
         Ok(out)
     }
 
-    /// Rescan the store tree and rebuild the index from the live tree.
-    pub fn rebuild(&self, local: &Local) -> Result<usize, String> {
-        {
-            let guard = self.conn.lock().map_err(|e| e.to_string())?;
-            let conn = guard.as_ref().ok_or_else(|| "index unavailable".to_string())?;
-            conn.execute_batch("DELETE FROM files_fts; DELETE FROM files;")
-                .map_err(|e| e.to_string())?;
-        }
-        let mut count = 0usize;
-        for space in ["artifacts", "files", "attachments", "backups"] {
-            let root = local.root.join(&local.device_id).join(space);
-            let entries = collect_tree(local, &root, space, &local.device_id);
-            for e in entries {
-                self.index_file(&e);
-                count += 1;
+    pub fn clear(&self) -> Result<(), String> {
+        let guard = self.conn.lock().map_err(|e| e.to_string())?;
+        let conn = guard
+            .as_ref()
+            .ok_or_else(|| "index unavailable".to_string())?;
+        conn.execute_batch("DELETE FROM files_fts; DELETE FROM files;")
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Walk built-in + declared custom spaces for this device.
+    pub fn scan_tree(&self, local: &Local) -> Vec<IndexEntry> {
+        let mut spaces: Vec<String> = super::spaces::BUILTIN_SPACES
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        for p in local.spaces.list() {
+            if !spaces.iter().any(|s| s == &p.name) {
+                spaces.push(p.name);
             }
+        }
+        let mut out = Vec::new();
+        for space in spaces {
+            let root = local.root.join(&local.device_id).join(&space);
+            out.extend(collect_tree(local, &root, &space, &local.device_id));
+        }
+        out
+    }
+
+    /// Rescan the store tree and rebuild the FTS index from the live tree.
+    /// Prefer [`Local::rebuild_index`] so vectors are rebuilt too.
+    pub fn rebuild(&self, local: &Local) -> Result<usize, String> {
+        self.clear()?;
+        let mut count = 0usize;
+        for e in self.scan_tree(local) {
+            self.index_file(&e);
+            count += 1;
         }
         Ok(count)
     }
