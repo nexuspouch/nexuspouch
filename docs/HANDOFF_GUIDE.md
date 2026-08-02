@@ -38,6 +38,7 @@
 | G 快照管理薄层 | **未成文，先补设计**（建议并入 SPACE_BOUNDARY_DESIGN 或独立文档） | 只有讨论记录 |
 | H 向量搜索 P1-P3 | VECTOR_SEARCH_DESIGN.md（已定稿） | 按里程碑推进 |
 | I 会话历史管理（P1-P3 已落地） | SESSION_HISTORY_DESIGN.md + BACKLOG I | 剩余：**P1.5 Web 会话管理 UI**（主打卖点） |
+| J 召回准确性 R1-R3 | RECALL_ACCURACY_DESIGN.md（已定稿） | 依赖 I/H 混合检索基线（已就位） |
 
 ## 3. 工作规则（红线）
 
