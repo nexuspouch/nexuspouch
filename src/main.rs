@@ -299,6 +299,11 @@ async fn serve(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     if !bindings_registry.is_empty() {
         tracing::info!("bindings: periodic sync every 60s");
         nexuspouch::store::bindings::start_periodic(Arc::clone(&store), Duration::from_secs(60));
+        let bindings = bindings_registry.list();
+        match nexuspouch::store::bindings::start_watcher(Arc::clone(&store), bindings) {
+            Ok(()) => tracing::info!("bindings: filesystem watcher active"),
+            Err(e) => tracing::warn!("bindings: watcher unavailable ({e}); periodic only"),
+        }
     }
     store.start_periodic_gc(Duration::from_secs(3600));
 

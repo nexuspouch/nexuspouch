@@ -9,6 +9,7 @@
 use super::{io_err, Local, OpError, MAX_CHUNK};
 use crate::protocol::{self, Frame};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use notify::Watcher as _;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -278,6 +279,49 @@ pub fn start_periodic(local: std::sync::Arc<Local>, every: Duration) {
             });
         }
     });
+}
+
+/// Event-driven watcher (M6 §4): watches each binding's external directory
+/// and triggers a debounced reconciliation on filesystem events. The periodic
+/// sync remains as a safety net for missed events (inotify overflow etc.).
+pub fn start_watcher(
+    local: std::sync::Arc<Local>,
+    bindings: Vec<Binding>,
+) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        let mut watcher = match notify::recommended_watcher(
+            move |res: notify::Result<notify::Event>| {
+                if res.is_ok() {
+                    let _ = tx.send(());
+                }
+            },
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::warn!("bindings watcher unavailable: {e}");
+                return;
+            }
+        };
+        for b in &bindings {
+            if let Err(e) = watcher.watch(
+                std::path::Path::new(&b.external),
+                notify::RecursiveMode::Recursive,
+            ) {
+                tracing::warn!("watch {}: {e}", b.external);
+            }
+        }
+        while rx.recv().is_ok() {
+            // Debounce: coalesce bursts (editor atomic renames etc.).
+            std::thread::sleep(Duration::from_millis(500));
+            while rx.try_recv().is_ok() {}
+            let l = std::sync::Arc::clone(&local);
+            std::thread::spawn(move || {
+                let _ = sync_all(&l);
+            });
+        }
+    });
+    Ok(())
 }
 
 fn walk(

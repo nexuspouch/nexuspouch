@@ -1,8 +1,9 @@
 # M6 设计：本地目录绑定与摄取（Folder Binding）
 
 > 状态：设计稿 v0.1（2026-08-01）
-> 实现状态：M6a（App 目录绑定服务）+ M6b（节点 `--bind`）核心已落地
-> （2026-08-02），reflink/hardlink 摄取与事件驱动 watcher 为后续增强。
+> 实现状态：M6a（App 目录绑定服务 + 管理页 UI）+ M6b（节点 `--bind` +
+> notify 事件驱动 watcher + 60s 周期兜底）已落地（2026-08-02）；
+> reflink/hardlink 摄取为后续增强（需扩展 commit 写路径）。
 > 关联：[storage_space_plan.md](storage_space_plan.md)（设备目录模型）、
 > [storage_protocol_spec.md](storage_protocol_spec.md) §2（写路径收敛）、
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)（M0-M5 已落地）
