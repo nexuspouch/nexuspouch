@@ -115,10 +115,30 @@ impl Local {
         if !ptr_path.exists() {
             local.save_pointer(&MasterPointer {
                 master: device_id.to_string(),
-                epoch: 0,
+                // Start at 1 so phone clients can adopt via applyPointer (epoch > 0).
+                epoch: 1,
             })?;
+        } else if let Ok(p) = local.load_pointer() {
+            // Migrate legacy epoch=0 pointers so query/apply can bootstrap remotes.
+            if p.epoch == 0 {
+                let _ = local.save_pointer(&MasterPointer {
+                    master: p.master,
+                    epoch: 1,
+                });
+            }
         }
         Ok(local)
+    }
+
+    /// Ensure `root/<device_id>/{spaces}` exist so paired peers appear in stats/browse.
+    pub fn ensure_device_spaces(&self, device_id: &str) -> Result<(), OpError> {
+        if !protocol::is_valid_device_id(device_id) {
+            return Err(OpError::new("bad_path", "invalid device id"));
+        }
+        for sp in ["artifacts", "files", "attachments", "backups"] {
+            std::fs::create_dir_all(self.root.join(device_id).join(sp)).map_err(io_err)?;
+        }
+        Ok(())
     }
 
     pub fn handle(

@@ -157,6 +157,25 @@ pub fn encode_qr(
     format!("shepaw://peer?{}#fp={fingerprint}&pk={pk}", ser.finish())
 }
 
+pub fn encode_qr_svg(payload: &str) -> Result<String, String> {
+    use qrcode::render::svg;
+    use qrcode::QrCode;
+    let code = QrCode::new(payload.as_bytes()).map_err(|e| e.to_string())?;
+    let svg = code
+        .render::<svg::Color>()
+        .min_dimensions(220, 220)
+        .dark_color(svg::Color("#000000"))
+        .light_color(svg::Color("#ffffff"))
+        .build();
+    // Drop XML prologue so the fragment can be injected via innerHTML.
+    Ok(svg
+        .trim_start()
+        .strip_prefix("<?xml version=\"1.0\" standalone=\"yes\"?>")
+        .unwrap_or(&svg)
+        .trim_start()
+        .to_string())
+}
+
 pub fn fingerprint_from_key(pub_key: &[u8; 32]) -> String {
     let sum = Sha256::digest(pub_key);
     hex::encode(&sum[..8])

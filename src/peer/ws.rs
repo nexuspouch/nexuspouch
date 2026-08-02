@@ -148,6 +148,9 @@ impl PeerServer {
             return;
         }
         let _ = super::pairing::save_paired_peer(&self.peers, &fp, &peer_pub, &req, &peer_id);
+        if let Err(e) = self.store.ensure_device_spaces(&fp) {
+            warn!("ensure peer device dirs {fp}: {e}");
+        }
         self.serve_transport(socket, sess, fp).await;
     }
 

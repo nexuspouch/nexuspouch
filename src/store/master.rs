@@ -14,7 +14,7 @@ pub fn load_pointer(local: &Local) -> Result<MasterPointer, OpError> {
     if !path.exists() {
         return Ok(MasterPointer {
             master: local.device_id.clone(),
-            epoch: 0,
+            epoch: 1,
         });
     }
     let raw = fs::read_to_string(&path).map_err(io_err)?;

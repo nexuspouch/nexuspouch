@@ -1,4 +1,4 @@
-use crate::peer::{encode_qr, PairingHub, PeerStore, SessionRegistry};
+use crate::peer::{encode_qr, encode_qr_svg, PairingHub, PeerStore, SessionRegistry};
 use crate::protocol::{self, Frame};
 use crate::store::{gc, Local, OpError};
 use serde_json::{json, Map, Value};
@@ -137,9 +137,11 @@ pub fn pairing_start(state: &AdminState) -> Result<Map<String, Value>, OpError> 
         &identity.fingerprint(),
         &identity.public_key,
     );
+    let qr_svg = encode_qr_svg(&qr).map_err(|e| OpError::new("internal", e))?;
     let mut out = Map::from_iter([
         ("code".into(), json!(code)),
         ("qr".into(), json!(qr)),
+        ("qr_svg".into(), json!(qr_svg)),
         ("local_endpoint".into(), json!(local)),
         ("fingerprint".into(), json!(identity.fingerprint())),
     ]);

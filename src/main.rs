@@ -308,6 +308,13 @@ async fn serve(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     store.start_periodic_gc(Duration::from_secs(3600));
 
     let peers = Arc::new(PeerStore::new(&args.root));
+    if let Ok(list) = peers.list() {
+        for p in list {
+            if let Err(e) = store.ensure_device_spaces(&p.fingerprint) {
+                tracing::warn!("ensure peer device dirs {}: {e}", p.fingerprint);
+            }
+        }
+    }
     let hub = Arc::new(PairingHub::new(
         Arc::clone(&identity),
         Arc::clone(&peers),

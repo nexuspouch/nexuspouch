@@ -26,6 +26,19 @@ pre { white-space: pre-wrap; word-break: break-word; font-size: .85rem; }
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid
   color-mix(in srgb, CanvasText 12%, transparent); }
+.qr { margin: .75rem 0; }
+.qr:empty { display: none; }
+.qr svg {
+  display: block; width: 220px; height: 220px;
+  background: #fff; border-radius: 8px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, CanvasText 12%, transparent);
+}
+.pair-pending {
+  margin-top: .75rem; padding: .75rem 1rem; border-radius: 8px;
+  background: color-mix(in srgb, #2e7d32 18%, Canvas);
+  border: 1px solid #2e7d32;
+}
+.pair-pending strong { display: block; margin-bottom: .35rem; }
 </style>
 </head>
 <body>
@@ -40,8 +53,9 @@ td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid
   <div class="card">
     <div class="row" style="justify-content:space-between">
       <h2>Noise 配对</h2>
-      <button id="pairStart">开始配对</button>
+      <button id="pairStart">添加设备</button>
     </div>
+    <div id="pairQr" class="qr" aria-label="配对二维码"></div>
     <pre id="pairInfo" class="muted">点击「开始配对」生成 QR / 配对码，用 App 扫描后在此批准。</pre>
     <div id="pairPending"></div>
     <h2 style="margin-top:1rem">已配对设备</h2>
@@ -77,7 +91,7 @@ td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid
   </div>
   <div class="card">
     <h2>分区浏览</h2>
-    <p class="muted">对齐 App 存储浏览器：列出正式文件并删除（进回收站）。</p>
+    <p class="muted">浏览本机上的设备镜像（含已配对设备）；未同步前列表可能为空。删除进回收站。</p>
     <div class="row">
       <label>设备 <select id="browseDevice"></select></label>
       <label>分区 <select id="browseSpace">
@@ -264,27 +278,25 @@ async function refresh() {
       });
     }
 
-    // populate browse device select
-    const browseSel = $('browseDevice');
-    const prevBrowse = browseSel.value;
-    const browseIds = ids.length ? ids.slice() : (selfId ? [selfId] : []);
-    if (selfId && !browseIds.includes(selfId)) browseIds.unshift(selfId);
-    browseSel.innerHTML = browseIds.map(id =>
-      '<option value="' + id + '"' + (id === selfId ? ' selected' : '') + '>' +
-      shortId(id) + (id === selfId ? ' (本机)' : '') + '</option>'
-    ).join('');
-    if (prevBrowse && browseIds.includes(prevBrowse)) browseSel.value = prevBrowse;
-
+    const peerNames = {};
+    let plist = [];
     try {
       const peers = await api('/admin/api/peers');
-      const plist = peers.peers || [];
+      plist = peers.peers || [];
       if (!plist.length) {
         $('peers').innerHTML = '<p class="muted">暂无已配对设备</p>';
       } else {
-        let phtml = '<table><thead><tr><th>名称</th><th>fingerprint</th><th></th></tr></thead><tbody>';
+        let phtml = '<table><thead><tr><th>名称</th><th>fingerprint</th><th>角色</th><th></th></tr></thead><tbody>';
+        if (masterId && masterId === selfId) {
+          phtml += '<tr><td>本机</td><td>' + shortId(selfId) +
+            '</td><td><span class="ok">master</span></td><td></td></tr>';
+        }
         for (const p of plist) {
+          if (p.fingerprint) peerNames[p.fingerprint] = p.device_name || '';
+          const isMaster = p.fingerprint && p.fingerprint === masterId;
           phtml += '<tr><td>' + (p.device_name||'') +
             '</td><td>' + shortId(p.fingerprint) +
+            '</td><td>' + (isMaster ? '<span class="ok">master</span>' : 'peer') +
             '</td><td><button data-fp="' + (p.fingerprint||'') +
             '" class="unpair">解除配对</button></td></tr>';
         }
@@ -303,31 +315,30 @@ async function refresh() {
           };
         });
       }
-      const pendingPair = await api('/admin/api/pairing/pending');
-      const p = pendingPair.pending;
-      if (!p) {
-        $('pairPending').innerHTML = '';
-      } else {
-        $('pairPending').innerHTML = '<div class="row">入站请求：' +
-          (p.device_name||'') + ' (' + shortId(p.fingerprint) + ') ' +
-          '<button id="pairAccept">批准</button>' +
-          '<button id="pairReject">拒绝</button></div>';
-        $('pairAccept').onclick = async () => {
-          await api('/admin/api/pairing/decide', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({accept:true})
-          });
-          refresh();
-        };
-        $('pairReject').onclick = async () => {
-          await api('/admin/api/pairing/decide', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({accept:false})
-          });
-          refresh();
-        };
-      }
     } catch (_) {}
+
+    // browse: local device dirs ∪ paired peers (fingerprint = device id)
+    const browseSel = $('browseDevice');
+    const prevBrowse = browseSel.value;
+    const browseSet = {};
+    if (selfId) browseSet[selfId] = true;
+    for (const id of ids) browseSet[id] = true;
+    for (const fp of Object.keys(peerNames)) browseSet[fp] = true;
+    const browseIds = Object.keys(browseSet).sort((a, b) => {
+      if (a === selfId) return -1;
+      if (b === selfId) return 1;
+      return a.localeCompare(b);
+    });
+    browseSel.innerHTML = browseIds.map(id => {
+      let label = shortId(id);
+      if (id === selfId) label += ' (本机)';
+      else if (peerNames[id]) label = peerNames[id] + ' · ' + shortId(id);
+      return '<option value="' + id + '"' +
+        (id === selfId ? ' selected' : '') + '>' + label + '</option>';
+    }).join('');
+    if (prevBrowse && browseSet[prevBrowse]) browseSel.value = prevBrowse;
+
+    await updatePairPending();
 
     const pending = await api('/admin/api/import/pending');
     const reqs = pending.requests || [];
@@ -610,13 +621,87 @@ $('runReprotect').onclick = async () => {
     refresh();
   } catch (e) { $('msg').textContent = String(e.message||e); }
 };
+let pairPollTimer = null;
+let pairAwaiting = false;
+function stopPairPoll() {
+  if (pairPollTimer) { clearInterval(pairPollTimer); pairPollTimer = null; }
+}
+function startPairPoll() {
+  stopPairPoll();
+  pairAwaiting = true;
+  pairPollTimer = setInterval(() => { updatePairPending(); }, 1000);
+}
+async function updatePairPending() {
+  try {
+    const pendingPair = await api('/admin/api/pairing/pending');
+    const p = pendingPair.pending;
+    const box = $('pairPending');
+    const prev = box.dataset.sid || '';
+    if (!p) {
+      if (prev) {
+        box.dataset.sid = '';
+        box.innerHTML = '';
+        $('pairQr').innerHTML = '';
+        $('pairInfo').textContent = '配对已结束。可再次点击「开始配对」。';
+        pairAwaiting = false;
+        stopPairPoll();
+        refresh();
+      } else if (!pairAwaiting) {
+        stopPairPoll();
+      }
+      return;
+    }
+    if (!pairPollTimer) startPairPoll();
+    if (prev === p.session_id) return;
+    box.dataset.sid = p.session_id;
+    box.innerHTML = '<div class="pair-pending">' +
+      '<strong>有设备请求配对，请确认</strong>' +
+      '<div class="row">' +
+      (p.device_name||'') + ' · ' + shortId(p.fingerprint) +
+      ' <button id="pairAccept">批准</button>' +
+      ' <button id="pairReject">拒绝</button></div></div>';
+    $('pairAccept').onclick = async () => {
+      try {
+        await api('/admin/api/pairing/decide', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({accept:true})
+        });
+        pairAwaiting = false;
+        stopPairPoll();
+        box.dataset.sid = '';
+        box.innerHTML = '<p class="ok">已批准</p>';
+        $('pairQr').innerHTML = '';
+        refresh();
+      } catch (e) { $('msg').textContent = String(e.message||e); }
+    };
+    $('pairReject').onclick = async () => {
+      try {
+        await api('/admin/api/pairing/decide', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({accept:false})
+        });
+        pairAwaiting = false;
+        stopPairPoll();
+        box.dataset.sid = '';
+        box.innerHTML = '<p class="muted">已拒绝</p>';
+        $('pairQr').innerHTML = '';
+        refresh();
+      } catch (e) { $('msg').textContent = String(e.message||e); }
+    };
+  } catch (_) {}
+}
 $('pairStart').onclick = async () => {
   try {
     const out = await api('/admin/api/pairing/start', {method:'POST'});
+    $('pairPending').dataset.sid = '';
+    $('pairPending').innerHTML = '';
+    $('pairQr').innerHTML = out.qr_svg || '';
     $('pairInfo').textContent = 'code=' + out.code +
       '\nlocal=' + out.local_endpoint +
       (out.channel_endpoint ? ('\nchannel=' + out.channel_endpoint) : '') +
-      '\nfp=' + out.fingerprint + '\n\n' + out.qr;
+      '\nfp=' + out.fingerprint + '\n\n' + out.qr +
+      '\n\n等待手机扫码…（页面会自动弹出批准）';
+    startPairPoll();
     refresh();
   } catch (e) { $('msg').textContent = String(e.message||e); }
 };
