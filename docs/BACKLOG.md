@@ -1,0 +1,75 @@
+# 待办与预留项（Backlog）
+
+> 状态快照：2026-08-02。记录 M0-M6 实现主线完成后的未完成 / 预留项，
+> 按主题分组；每项标注状态、依赖与优先级建议。实现进展同步更新本文件。
+
+## A. 边界设计 Step 3（明确预留，不承诺）
+
+| 项 | 状态 | 依赖 |
+|----|------|------|
+| 空间级配额（每 space `max_bytes`，commit 时强制）与占用可视化 | 预留 | Step 2 已落地（space.declare + 属性模型） |
+| 按空间粒度的导入授权（当前 import_grant 是空间属性，授权执行粒度仍是整体） | 预留 | 协议评审 |
+| 自定义空间管理完善（配额、可视化、按空间统计） | 预留 | 上两项 |
+
+## B. M6 目录绑定增强（已规划，待实现）
+
+| 项 | 状态 | 依赖 |
+|----|------|------|
+| App 侧事件驱动 watcher（当前 Dart 端为轮询 `startPeriodic`；Rust 端 notify 已落地） | 待实现 | `watcher` 包（新依赖）或轮询保留 |
+| 绑定 UI 目录选择器（当前手输路径，可换 file_selector 原生选目录） | 待实现 | 新依赖 + 平台权限 |
+| rename/move 识别（保留版本历史；当前 delete+add） | 待实现 | Rust 用 inode；Dart 缺 inode 需 FFI 或 hash+path 双信号 |
+| 半写保护（文件连续两次采样一致才摄取） | 待实现 | 无 |
+| 忽略规则变更触发全量对账 | 待实现 | 无 |
+| 扫描限速 + 单绑定文件上限（默认 50 万，可配） | 待实现 | 无 |
+| Rust 原生 `clonefile` / `FICLONERANGE` FFI（当前 `cp -c` / `cp --reflink=auto`，行为等价但多一次进程调用） | 待实现（可选优化） | 平台 FFI |
+
+## C. ShePaw App 消费层（协议已就绪，UI 未做）
+
+| 项 | 状态 | 依赖 |
+|----|------|------|
+| 版本浏览 UI（StorageBrowserScreen 版本列表 / 血缘 manifest 入口） | 待实现 | M2 协议 + StoreService.versionsList/versionsRead（已就绪） |
+| 交接通知展示（`handoff.created`；自动 ack 已做） | 待实现 | M3 事件 |
+| 搜索框（调 `/api/v1/search`） | 待实现 | M5 API（已就绪） |
+| agents 列表展示（App 存储管理页接 admin API） | 待实现 | M4 admin API（已就绪） |
+| Dart 自定义空间 URI 解析（`parseStoreUri` 仍严格四空间；ACL 已对齐） | 待实现 | StoreSpace.isValidSyntax（已就绪） |
+
+## D. agent-bridge / MCP
+
+| 项 | 状态 | 依赖 |
+|----|------|------|
+| acp-proxy 网关工具管线正式注入 store 工具（`store-tools.ts` 已就绪） | 待实现 | ACP SDK 工具注入挂点 |
+| MCP `store_write` 透传 `context` / `to_agent` 走 handoff（M3 语义） | 待实现 | M3 已就绪 |
+| MCP `store://` 资源订阅（subscribe） | 待实现（低优先） | MCP 协议 |
+
+## E. 协议 / 双端实现缺口
+
+| 项 | 状态 | 依赖 |
+|----|------|------|
+| Dart master 侧服务端：App 自己当 master（loopback）时 versions / handoff / 自定义空间的服务端逻辑 | 待决策（双实现架构固有尾巴） | 是否值得在 Dart LocalStore 补实现 |
+| Windows 平台支持（README 限定 macOS/Linux） | 待决策 | 平台适配 |
+| versions 保留策略管理页 / 发布产物可视化 | 待实现（低优先） | M2 |
+
+## F. 运维 / QA
+
+| 项 | 状态 | 依赖 |
+|----|------|------|
+| 真机集成基线 QA（配对/同步/版本/交接/检索，见 QA_BASELINE.md 手工清单） | 待执行（需硬件） | 无 |
+| agent-bridge vitest 在 Node 24 下启动失败（vite 兼容问题） | 待修复 | 锁 Node 版本或升级 vite |
+| 18787 旧 nexuspouch 实例数据根目录确认（此前误杀，如需恢复） | 待确认 | 用户原启动命令 |
+
+## G. 产品层（聊过，未成文/未实现）
+
+| 项 | 状态 | 依赖 |
+|----|------|------|
+| backups「快照管理薄层」：节点侧快照注册表 + 完整性校验 + 可选节点侧保留 | 设计讨论过，未落文档/未实现 | 边界设计 Step 2 后 |
+| 客户端 profile 细则收敛（ShePaw 业务字段散在 App 实现里） | 部分完成（CLIENT_PROFILES.md 已建） | 无 |
+
+## 优先级建议
+
+| 优先级 | 项 | 理由 |
+|--------|----|------|
+| P0（尽快） | F：vitest 兼容、真机 QA | 收尾稳定性，避免环境债 |
+| P1（产品价值） | C：App 消费 UI（版本/搜索/交接通知） | 让 M2-M5 能力对用户可见 |
+| P2（完整性） | B、D：绑定增强、MCP handoff 透传 | 完善 M6 与生态入口 |
+| P3（需决策） | E：Dart master 服务端、Windows | 架构取舍，先讨论再投入 |
+| P4（不承诺） | A、G：空间配额、快照薄层 | 预留，等真实需求 |

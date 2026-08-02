@@ -116,6 +116,7 @@ Nexuspouch 面向 AI agent 协作：agent 拿到 `store://` URI 即可读写、�
 - **现在**：HTTP API + Bearer token（[docs/API.md](docs/API.md)）+ 只读 WebDAV + MCP 服务器（`nexuspouch mcp`，stdin/stdout）
 - **接入指南**：[docs/AGENTS.md](docs/AGENTS.md)（身份/作用域/配额/引用纪律）
 - **路线**：M2 版本化 URI 与血缘；M3 交接/事件；M4 agent 身份与配额；M5 检索（[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)）
+- **待办与预留项**：[docs/BACKLOG.md](docs/BACKLOG.md)（按主题分组 + 优先级建议）
 
 ## Development
 
