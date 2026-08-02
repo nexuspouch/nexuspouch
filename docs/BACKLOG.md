@@ -64,6 +64,17 @@
 | backups「快照管理薄层」：节点侧快照注册表 + 完整性校验 + 可选节点侧保留 | 设计讨论过，未落文档/未实现 | 边界设计 Step 2 后 |
 | 客户端 profile 细则收敛（ShePaw 业务字段散在 App 实现里） | 部分完成（CLIENT_PROFILES.md 已建） | 无 |
 
+## H. 向量搜索（已定稿设计，待实现）
+
+| 项 | 状态 | 依赖 |
+|----|------|------|
+| P1：embedder 抽象（默认本地 ONNX 小模型）+ embeddings 表 + 帧/HTTP/MCP `semantic` 查询 + 手机 master 降级语义 | 待实现 | 设计文档 VECTOR_SEARCH_DESIGN.md |
+| P2：`memory` 空间 profile + 蒸馏记忆写入约定 + 管理页 | 待实现 | P1 |
+| P3：FTS5+向量 RRF 混合排序 + 重嵌入策略 + 规模评估（HNSW 与否） | 待实现 | P1/P2 |
+
+设计要点：向量能力绑定 master（PC/NAS）；手机经 store 帧查询、不做本地向量；
+默认本地 embedding 保隐私；`memory` 空间与血缘/版本/交接自动衔接。
+
 ## 优先级建议
 
 | 优先级 | 项 | 理由 |

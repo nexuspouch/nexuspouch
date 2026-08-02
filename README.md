@@ -118,6 +118,7 @@ Nexuspouch 面向 AI agent 协作：agent 拿到 `store://` URI 即可读写、�
 - **路线**：M2 版本化 URI 与血缘；M3 交接/事件；M4 agent 身份与配额；M5 检索（[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)）
 - **待办与预留项**：[docs/BACKLOG.md](docs/BACKLOG.md)（按主题分组 + 优先级建议）
 - **真机测试路径**：[docs/DEVICE_TESTING.md](docs/DEVICE_TESTING.md)（配对→同步→版本→交接→检索→绑定→迁移 8 步）
+- **向量搜索设计**：[docs/VECTOR_SEARCH_DESIGN.md](docs/VECTOR_SEARCH_DESIGN.md)（master 侧能力 + 本地 embedding + memory 空间）
 
 ## Development
 
