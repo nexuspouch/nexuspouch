@@ -80,6 +80,17 @@
 设计要点：向量能力绑定 master（PC/NAS）；手机经 store 帧查询、不做本地向量；
 默认本地 embedding 保隐私；`memory` 空间与血缘/版本/交接自动衔接。
 
+## I. Agent 会话历史管理（已定稿设计，待实现）
+
+| 项 | 状态 | 依赖 |
+|----|------|------|
+| P1：`sessions` 空间 + 格式适配层 + 文件级摄取（复用 M6 绑定）+ FTS5 全文 + 敏感清洗（strict 默认） | 待实现 | 设计文档 SESSION_HISTORY_DESIGN.md |
+| P2：会话语义召回（分块 embedding + `session_recall` MCP） | 待实现 | H 向量搜索 P1 |
+| P3：agent-bridge 网关 transcript 实时旁路捕获 | 待实现 | agent-bridge 挂点 |
+
+设计要点：会话历史是记忆层最大数据源；`sessions` 空间默认 private +
+索引前脱敏；版本化时间线；跨设备备份与语义召回。
+
 ## 优先级建议
 
 | 优先级 | 项 | 理由 |
