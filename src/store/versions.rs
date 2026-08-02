@@ -90,6 +90,66 @@ fn keep_last() -> usize {
         .unwrap_or(DEFAULT_KEEP)
 }
 
+/// Current global version retention (env `NEXUSPOUCH_VERSIONS_KEEP`, default 10).
+pub fn keep_last_policy() -> usize {
+    keep_last()
+}
+
+/// Scan `.versions/` for paths marked `protected` (published artifacts).
+pub fn list_published(local: &Local) -> Vec<Value> {
+    let root = local.root.join(".versions");
+    let mut out = Vec::new();
+    walk_published(&root, &root, &mut out);
+    out.sort_by(|a, b| {
+        a.get("uri")
+            .and_then(|v| v.as_str())
+            .cmp(&b.get("uri").and_then(|v| v.as_str()))
+    });
+    out
+}
+
+fn walk_published(root: &Path, dir: &Path, out: &mut Vec<Value>) {
+    let Ok(rd) = fs::read_dir(dir) else {
+        return;
+    };
+    for ent in rd.flatten() {
+        let path = ent.path();
+        if path.is_dir() {
+            let index_path = path.join("index.json");
+            if index_path.is_file() {
+                if let Ok(raw) = fs::read_to_string(&index_path) {
+                    if let Ok(idx) = serde_json::from_str::<VersionIndex>(&raw) {
+                        if idx.protected {
+                            if let Some(rel) = path.strip_prefix(root).ok() {
+                                let parts: Vec<&str> = rel
+                                    .iter()
+                                    .filter_map(|c| c.to_str())
+                                    .collect();
+                                // <device>/<space>/<rel…>
+                                if parts.len() >= 3 {
+                                    let device = parts[0];
+                                    let space = parts[1];
+                                    let file_rel = parts[2..].join("/");
+                                    out.push(json!({
+                                        "uri": format!("store://{space}/{device}/{file_rel}"),
+                                        "space": space,
+                                        "device": device,
+                                        "path": file_rel,
+                                        "versions": idx.versions.len(),
+                                        "protected": true,
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                walk_published(root, &path, out);
+            }
+        }
+    }
+}
+
 fn file_sha256(path: &Path) -> Result<(String, i64), OpError> {
     let mut f = fs::File::open(path).map_err(io_err)?;
     let mut h = Sha256::new();

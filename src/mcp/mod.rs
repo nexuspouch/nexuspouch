@@ -12,7 +12,10 @@ use crate::sdk;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
+use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::time::{interval, Duration};
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SERVER_NAME: &str = "nexuspouch";
@@ -56,6 +59,10 @@ fn map_store_err(e: String) -> RpcError {
 pub struct McpServer {
     client: sdk::Client,
     device: String,
+    /// Subscribed resource URI prefixes (`resources/subscribe`).
+    subscriptions: Mutex<HashSet<String>>,
+    /// Highest store event seq already notified.
+    last_event_seq: Mutex<i64>,
 }
 
 impl McpServer {
@@ -63,6 +70,8 @@ impl McpServer {
         Self {
             client: sdk::Client::new(base, token),
             device: device.into(),
+            subscriptions: Mutex::new(HashSet::new()),
+            last_event_seq: Mutex::new(0),
         }
     }
 
@@ -75,6 +84,8 @@ impl McpServer {
         Self {
             client: sdk::Client::new(base, token).with_agent(agent),
             device: device.into(),
+            subscriptions: Mutex::new(HashSet::new()),
+            last_event_seq: Mutex::new(0),
         }
     }
 
@@ -125,6 +136,8 @@ impl McpServer {
             "tools/list" => Ok(self.tools_list()),
             "tools/call" => self.tools_call(&params),
             "resources/list" => Ok(self.resources_list()),
+            "resources/subscribe" => self.resources_subscribe(&params),
+            "resources/unsubscribe" => self.resources_unsubscribe(&params),
             _ => Err(rpc_err(-32601, format!("method not found: {method}"))),
         };
         Some(match result {
@@ -149,7 +162,7 @@ impl McpServer {
             "protocolVersion": proto,
             "capabilities": {
                 "tools": {"listChanged": false},
-                "resources": {"subscribe": false},
+                "resources": {"subscribe": true},
             },
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
         }))
@@ -164,6 +177,87 @@ impl McpServer {
                 "mimeType": "application/json",
             }]
         })
+    }
+
+    fn resources_subscribe(&self, params: &Value) -> Result<Value, RpcError> {
+        let uri = str_arg(params, "uri")?;
+        if !(uri.starts_with("store://") || uri == "store://") {
+            return Err(invalid_params("uri must be a store:// prefix"));
+        }
+        if let Ok(mut g) = self.subscriptions.lock() {
+            g.insert(uri.to_string());
+        }
+        Ok(json!({}))
+    }
+
+    fn resources_unsubscribe(&self, params: &Value) -> Result<Value, RpcError> {
+        let uri = str_arg(params, "uri")?;
+        if let Ok(mut g) = self.subscriptions.lock() {
+            g.remove(uri);
+        }
+        Ok(json!({}))
+    }
+
+    /// Poll recent store events and build `notifications/resources/updated` messages.
+    pub fn poll_resource_notifications(&self) -> Vec<Value> {
+        let subs = match self.subscriptions.lock() {
+            Ok(g) => g.clone(),
+            Err(_) => return Vec::new(),
+        };
+        if subs.is_empty() {
+            return Vec::new();
+        }
+        let Ok(out) = self.client.recent_events(50) else {
+            return Vec::new();
+        };
+        let events = out.get("events").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let mut last = match self.last_event_seq.lock() {
+            Ok(g) => *g,
+            Err(_) => return Vec::new(),
+        };
+        let mut notes = Vec::new();
+        let mut max_seq = last;
+        for ev in events {
+            let seq = ev.get("seq").and_then(|v| v.as_i64()).unwrap_or(0);
+            if seq <= last {
+                continue;
+            }
+            max_seq = max_seq.max(seq);
+            let uri = ev.get("uri").and_then(|v| v.as_str()).unwrap_or("");
+            let space = ev.get("space").and_then(|v| v.as_str()).unwrap_or("");
+            let matched = subs.iter().any(|prefix| {
+                if prefix == "store://" {
+                    return true;
+                }
+                (!uri.is_empty() && uri.starts_with(prefix.as_str()))
+                    || (!space.is_empty()
+                        && (prefix == &format!("store://{space}/")
+                            || prefix == &format!("store://{space}")))
+            });
+            if !matched {
+                continue;
+            }
+            let notify_uri = if uri.is_empty() {
+                if space.is_empty() {
+                    "store://".to_string()
+                } else {
+                    format!("store://{space}/")
+                }
+            } else {
+                uri.to_string()
+            };
+            notes.push(json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/resources/updated",
+                "params": {"uri": notify_uri},
+            }));
+        }
+        if max_seq > last {
+            if let Ok(mut g) = self.last_event_seq.lock() {
+                *g = max_seq;
+            }
+        }
+        notes
     }
 
     fn tools_list(&self) -> Value {
@@ -608,19 +702,36 @@ pub async fn run(
     let mut lines = tokio::io::BufReader::new(stdin).lines();
     let stdout = tokio::io::stdout();
     let mut out = tokio::io::BufWriter::new(stdout);
-    while let Some(line) = lines.next_line().await? {
-        if line.trim().is_empty() {
-            continue;
-        }
-        if line.trim().to_ascii_lowercase().starts_with("content-length:") {
-            // Header block: the following blank line is skipped by the loop
-            // and the body arrives as the next line.
-            continue;
-        }
-        if let Some(resp) = server.handle_line(&line) {
-            out.write_all(resp.as_bytes()).await?;
-            out.write_all(b"\n").await?;
-            out.flush().await?;
+    let mut tick = interval(Duration::from_secs(2));
+    loop {
+        tokio::select! {
+            line = lines.next_line() => {
+                let Some(line) = line? else { break; };
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if line.trim().to_ascii_lowercase().starts_with("content-length:") {
+                    continue;
+                }
+                if let Some(resp) = server.handle_line(&line) {
+                    out.write_all(resp.as_bytes()).await?;
+                    out.write_all(b"\n").await?;
+                    out.flush().await?;
+                }
+                // Flush any pending resource notifications after each request.
+                for note in server.poll_resource_notifications() {
+                    out.write_all(note.to_string().as_bytes()).await?;
+                    out.write_all(b"\n").await?;
+                }
+                out.flush().await?;
+            }
+            _ = tick.tick() => {
+                for note in server.poll_resource_notifications() {
+                    out.write_all(note.to_string().as_bytes()).await?;
+                    out.write_all(b"\n").await?;
+                }
+                out.flush().await?;
+            }
         }
     }
     Ok(())
@@ -692,6 +803,7 @@ mod tests {
         );
         assert_eq!(init["result"]["serverInfo"]["name"], "nexuspouch");
         assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
+        assert_eq!(init["result"]["capabilities"]["resources"]["subscribe"], true);
 
         let list = rpc(&server, 2, "tools/list", json!({}));
         let tools = list["result"]["tools"].as_array().unwrap();
@@ -703,6 +815,32 @@ mod tests {
         for want in ["store_write", "store_read", "store_read_chunk", "store_meta", "store_list", "store_search", "store_watch", "store_space"] {
             assert!(names.contains(&want), "missing tool {want}");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn resources_subscribe_tracks_uri() {
+        let base = spawn_api().await;
+        let server = McpServer::new(base, "", DEVICE);
+        let sub = rpc(
+            &server,
+            1,
+            "resources/subscribe",
+            json!({"uri": "store://artifacts/"}),
+        );
+        assert!(sub.get("error").is_none(), "{sub}");
+        assert!(server
+            .subscriptions
+            .lock()
+            .unwrap()
+            .contains("store://artifacts/"));
+        let un = rpc(
+            &server,
+            2,
+            "resources/unsubscribe",
+            json!({"uri": "store://artifacts/"}),
+        );
+        assert!(un.get("error").is_none(), "{un}");
+        assert!(server.subscriptions.lock().unwrap().is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

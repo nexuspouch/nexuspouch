@@ -97,10 +97,8 @@
 
 1. **P0（收尾）**：F——vitest 已缓解（钉 Node 20）；真机 QA 仍待执行；
 2. **P1（产品价值）**：C——App 消费 UI 已落地（设计 + search/events 帧 + Browser/通知）；
-3. **P2（完整性）**：B（watcher/选择器/Rust rename）与 D（网关 MCP 注入）已落地；
-   clonefile FFI / MCP subscribe / Dart rename 仍可选；
-4. **P3**：E——Dart master 不做；Windows 见 WINDOWS_SUPPORT.md（已决策支持）；
+3. **P2（完整性）**：B/D 已落地（含 clonefile FFI、MCP subscribe、Dart rename）；
+4. **P3**：E——Dart master 不做；Windows W1–W3 文档齐，CI/真机待确认；
 5. **P4（不承诺）**：A、G——空间配额、快照薄层；
-6. **H 向量**：P1–P3 完成；**I 会话**：P1–P3 + 适配/分块（`codex/sessions-adapt`）；
-7. **Windows**：W1/W2 已推；W3 打磨 / CI 确认仍待；
-8. **最后**：F 真机 QA 手工清单；可选 clonefile FFI / MCP subscribe。
+6. **H 向量 / I 会话**：完成（含适配/分块）；
+7. **最后（需人）**：F 真机 QA；Windows CI Actions 确认；Windows/mDNS 真机勾选。

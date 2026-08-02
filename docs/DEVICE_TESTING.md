@@ -107,9 +107,19 @@ curl -s "$NODE/api/v1/list?uri=store://files/<节点device>/downloads/"
 2. admin「再保护」输入主密码 → `.system/reprotect/<ts>/` 生成
    `manifest.json + mirror.tar.enc`（App 侧可用同一主密码解密验证）。
 
-## 9. 通过标准
+## 9. Windows 节点（W3 勾选）
 
-- 第 1-8 步全部达到预期，无阻塞缺陷；
+对照 [windows/INSTALL.md](windows/INSTALL.md) / [windows/SERVICE.md](windows/SERVICE.md)：
+
+1. 便携 zip 或 NSSM 服务启动；admin 可开；
+2. 防火墙放行后手机扫码配对；
+3. 绑定一本地目录 → 增/改/删/改名（sha）→ store 同步；
+4. `GET /admin/api/stats` 含 `volume_total_bytes` / `volume_free_bytes`；
+5. （可选）断网重连后 mDNS 或手动 URL 仍可连。
+
+## 10. 通过标准
+
+- 第 1-8 步全部达到预期，无阻塞缺陷；Windows 节点另勾第 9 步；
 - 任一协议行为与双端 fixture 不一致 → 阻断（先回协议评审）。
 
 ## 常见问题
@@ -120,3 +130,4 @@ curl -s "$NODE/api/v1/list?uri=store://files/<节点device>/downloads/"
 | 配对成功但不同步 | admin peers 是否 owner；master 指针是否指向节点 |
 | 搜索不到刚写的文件 | 索引随 commit 异步写入；等 1s 重试或 `index rebuild` |
 | 绑定目录没反应 | watcher 日志（`RUST_LOG=info`）；确认外部目录权限可读 |
+| Windows 配对失败 | 防火墙 TCP 端口；是否监听 `0.0.0.0`；见 windows/SERVICE.md |

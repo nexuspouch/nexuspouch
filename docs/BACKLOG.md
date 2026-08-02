@@ -21,7 +21,7 @@
 | 半写保护（文件连续两次采样一致才摄取） | ✅ | `NEXUSPOUCH_BINDING_STABLE_MS`（默认 300） |
 | 忽略规则变更触发全量对账 | ✅ | index `__meta__.ignore` fingerprint |
 | 扫描限速 + 单绑定文件上限（默认 50 万，可配） | ✅ | `NEXUSPOUCH_BINDING_MAX_FILES` |
-| Rust 原生 `clonefile` / `FICLONERANGE` FFI（当前 `cp -c` / `cp --reflink=auto`，行为等价但多一次进程调用） | 待实现（可选优化） | 平台 FFI |
+| Rust 原生 `clonefile` / `FICLONERANGE` FFI（当前 `cp -c` / `cp --reflink=auto`，行为等价但多一次进程调用） | ✅（macOS `clonefile` + Linux `FICLONE`，失败回退 `cp`） | 平台 FFI |
 
 ## C. ShePaw App 消费层（协议已就绪，UI 未做）
 
@@ -44,15 +44,15 @@
 |----|------|------|
 | acp-proxy 网关工具管线正式注入 store 工具（`store-tools.ts` 已就绪） | ✅ | `NEXUSPOUCH_ROOT` → session MCP stdio 注入 |
 | MCP `store_write` 透传 `context` / `to_agent` 走 handoff（M3 语义） | ✅ | Nexuspouch MCP + agent-bridge store-tools |
-| MCP `store://` 资源订阅（subscribe） | 预留（低优先；现用 `store_watch`） | MCP 协议 |
+| MCP `store://` 资源订阅（subscribe） | ✅（`resources/subscribe` + 轮询 `notifications/resources/updated`；仍可用 `store_watch`） | MCP 协议 |
 
 ## E. 协议 / 双端实现缺口
 
 | 项 | 状态 | 依赖 |
 |----|------|------|
 | Dart master 侧服务端：App 自己当 master（loopback）时 versions / handoff / 自定义空间的服务端逻辑 | **已决策（2026-08-02）：不实现**。master 服务端能力只归 Nexuspouch；PC 单独安装服务；ShePaw App 仅做客户端。手机作 master 时增强能力（版本/交接/自定义空间/语义检索）按降级语义不可用，协议客户端能力保留 | 无 |
-| Windows 节点支持（闲置 PC 当 master） | W1/W2 已推（`codex/windows-w1` / `codex/windows-w2`）；W3 打磨见 WINDOWS_SUPPORT.md；CI Windows 待确认绿 | CI Windows runner |
-| versions 保留策略管理页 / 发布产物可视化 | 待实现（低优先） | M2 |
+| Windows 节点支持（闲置 PC 当 master） | W1/W2 已推；W3 文档已齐（INSTALL/SERVICE/DEVICE_TESTING§9）；CI/真机待确认 | CI + 人工 |
+| versions 保留策略管理页 / 发布产物可视化 | ✅（admin `/admin/api/versions` + UI 卡片） | M2 |
 
 ## F. 运维 / QA
 

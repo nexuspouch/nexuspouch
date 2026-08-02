@@ -31,6 +31,20 @@ pub fn stats(state: &AdminState) -> Result<Map<String, Value>, OpError> {
     Ok(data)
 }
 
+/// Version retention policy + published (protected) artifact inventory.
+pub fn versions_overview(state: &AdminState) -> Result<Map<String, Value>, OpError> {
+    let published = crate::store::versions::list_published(&state.store);
+    Ok(Map::from_iter([
+        (
+            "keep_last".into(),
+            json!(crate::store::versions::keep_last_policy()),
+        ),
+        ("keep_env".into(), json!("NEXUSPOUCH_VERSIONS_KEEP")),
+        ("published_count".into(), json!(published.len())),
+        ("published".into(), json!(published)),
+    ]))
+}
+
 pub fn recycle_list(state: &AdminState) -> Result<Map<String, Value>, OpError> {
     state.store.handle(
         Frame::from_parts("recycle.list", Map::new()),

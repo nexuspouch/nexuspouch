@@ -749,10 +749,23 @@ fn ingest_file(
     Ok(())
 }
 
-/// Reflink copy (CoW) via `cp` on Unix; Windows/NTFS has no CoW → always false
-/// so callers fall back to plain `fs::copy`.
+/// CoW clone when the FS supports it; otherwise false → caller uses `fs::copy`.
+/// macOS: `clonefile(2)`; Linux: `ioctl(FICLONE)`; Windows: unsupported.
 #[cfg(target_os = "macos")]
 fn reflink_copy(src: &Path, dest: &Path) -> bool {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(s) = CString::new(src.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let Ok(d) = CString::new(dest.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // Prefer native clonefile; fall back to `cp -c` if libc binding fails at runtime.
+    let rc = unsafe { libc::clonefile(s.as_ptr(), d.as_ptr(), 0) };
+    if rc == 0 {
+        return true;
+    }
     std::process::Command::new("cp")
         .arg("-c")
         .arg(src)
@@ -762,7 +775,37 @@ fn reflink_copy(src: &Path, dest: &Path) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
+fn reflink_copy(src: &Path, dest: &Path) -> bool {
+    use std::os::unix::io::AsRawFd;
+    let Ok(src_f) = fs::File::open(src) else {
+        return false;
+    };
+    let Ok(dest_f) = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dest)
+    else {
+        return false;
+    };
+    // FICLONE = _IOW(0x94, 9, int) — clone whole file when FS supports it.
+    const FICLONE: libc::c_ulong = 0x4004_9409;
+    let rc = unsafe { libc::ioctl(dest_f.as_raw_fd(), FICLONE, src_f.as_raw_fd()) };
+    if rc == 0 {
+        return true;
+    }
+    let _ = fs::remove_file(dest);
+    // Fallback: GNU cp --reflink=auto.
+    std::process::Command::new("cp")
+        .arg("--reflink=auto")
+        .arg(src)
+        .arg(dest)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 fn reflink_copy(src: &Path, dest: &Path) -> bool {
     std::process::Command::new("cp")
         .arg("--reflink=auto")

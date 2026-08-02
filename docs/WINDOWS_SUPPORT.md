@@ -49,9 +49,13 @@
 
 ### W3 打磨
 
-- 安装包/一键安装指引；防火墙放行指引；
-- 长路径处理（如需）；mDNS 在 Windows 网络环境实测；
-- 真机/Windows 实测条目并入 DEVICE_TESTING.md。
+| 项 | 状态 |
+|----|------|
+| 安装包 / 一键安装指引 | ✅ [windows/INSTALL.md](windows/INSTALL.md) |
+| 防火墙 + 服务化 | ✅ [windows/SERVICE.md](windows/SERVICE.md) |
+| 长路径说明 | ✅ INSTALL.md §3 |
+| DEVICE_TESTING Windows 勾选 | ✅ §9 |
+| mDNS / 绑定 notify 真机实测 | 待人工 |
 
 ## 3. 测试与验收
 

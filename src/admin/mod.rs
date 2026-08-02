@@ -52,6 +52,7 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/bindings", get(bindings_list))
         .route("/bindings/sync", post(bindings_sync))
         .route("/reprotect", post(reprotect))
+        .route("/versions", get(versions_overview))
         .with_state(state.clone());
 
     Router::new()
@@ -415,6 +416,10 @@ async fn spaces_declare(
         )
     })
     .await
+}
+
+async fn versions_overview(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    auth_json(state, headers, None, handler::versions_overview).await
 }
 
 async fn bindings_list(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {

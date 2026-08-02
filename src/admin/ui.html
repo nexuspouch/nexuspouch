@@ -167,6 +167,15 @@ td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid
   </div>
   <div class="card">
     <div class="row" style="justify-content:space-between">
+      <h2>Versions / 发布产物</h2>
+      <button id="loadVersionsBtn">刷新</button>
+    </div>
+    <p class="muted">全局保留：<code>NEXUSPOUCH_VERSIONS_KEEP</code>（默认 10；发布/protected 产物不修剪）。下方列出已发布（protected）路径。</p>
+    <pre id="versionsPolicy" class="muted">…</pre>
+    <pre id="versionsPublished" class="muted" style="margin-top:.5rem">…</pre>
+  </div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
       <h2>Spaces（空间属性）</h2>
       <button id="loadSpacesBtn">刷新</button>
     </div>
@@ -591,6 +600,21 @@ async function loadSpaces() {
   }
 }
 $('loadSpacesBtn').onclick = () => { loadSpaces(); };
+async function loadVersions() {
+  try {
+    const out = await api('/admin/api/versions');
+    $('versionsPolicy').textContent =
+      'keep_last=' + out.keep_last + ' (env ' + out.keep_env + ') · published=' + (out.published_count||0);
+    const pub = out.published || [];
+    $('versionsPublished').textContent = pub.length
+      ? pub.map(p => p.uri + ' · versions=' + p.versions).join('\n')
+      : '(no published/protected artifacts yet)';
+  } catch (e) {
+    $('versionsPolicy').textContent = String(e.message||e);
+    $('versionsPublished').textContent = '';
+  }
+}
+$('loadVersionsBtn').onclick = () => { loadVersions(); };
 $('declareSpace').onclick = async () => {
   try {
     const name = ($('spaceName').value || '').trim();
