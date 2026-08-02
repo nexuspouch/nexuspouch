@@ -101,5 +101,5 @@
    clonefile FFI / MCP subscribe / Dart rename 仍可选；
 4. **P3**：E——Dart master 不做；Windows 见 WINDOWS_SUPPORT.md（已决策支持）；
 5. **P4（不承诺）**：A、G——空间配额、快照薄层；
-6. **H 向量**：P1–P3 完成；**I 会话**：P1 骨架完成，P2/P3 待做；
-7. **最后**：F 真机 QA 手工清单。
+6. **H 向量**：P1–P3 完成；**I 会话**：P1–P3 骨架完成（适配器/分块可增强）；
+7. **最后**：F 真机 QA 手工清单；可选 Windows W1。

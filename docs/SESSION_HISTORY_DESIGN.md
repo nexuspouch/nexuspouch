@@ -1,7 +1,8 @@
 # Agent 会话历史管理设计（Session History）
 
-> 状态：P1 骨架已落地（2026-08-02）——`sessions` well-known 空间 + 索引 strict
-> 清洗 + `--bind` 到 sessions；格式适配器 / debounce / session_recall 仍待 P2+。
+> 状态：P1–P3 骨架已落地（2026-08-02）——`sessions` 空间 + strict 清洗 +
+> `--bind`；MCP `session_recall`；网关 transcript 旁路（debounce 写 jsonl）。
+> 格式适配器 / 消息级分块仍可增强。
 > 定位：把各 agent 的会话历史纳入 Nexuspouch 管理——跨设备备份、版本化、
 > 全文与语义召回。会话历史是记忆层的最大数据源，与
 > [VECTOR_SEARCH_DESIGN.md](VECTOR_SEARCH_DESIGN.md) 直接衔接。
@@ -103,13 +104,14 @@
 - MCP 工具 `session_recall(q)`；
 - 验收：跨会话语义召回命中（如"上次部署报错怎么解决的"）。
 
-### P3 网关实时捕获（1-2 周）
+### P3 网关实时捕获 — 已落地（骨架）
 
-- agent-bridge `acp-subprocess.ts` 增加 transcript 旁路：会话事件流实时写入
-  Nexuspouch（HTTP/MCP store_write），无需事后解析文件；
-- 覆盖远程 ACP / OpenClaw 等非文件型 agent；
-- 历史会话回填走 P1 文件导入；
-- 验收：网关内 agent 会话实时出现在 `sessions` 空间并可召回。
+- agent-bridge `SessionTranscriptSink`：prompt 用户轮 + drain 助手轮 →
+  debounce 5s → `StoreToolsClient.write` 到 `sessions/<engine>/<session>.jsonl`；
+- 启用：`NEXUSPOUCH_URL` + `NEXUSPOUCH_DEVICE` + `NEXUSPOUCH_ADMIN_TOKEN`
+  （有 `NEXUSPOUCH_ROOT` 时 URL 默认同机 `:8787`）；`NEXUSPOUCH_TRANSCRIPT=off` 关闭；
+- 历史会话回填仍走 P1 文件绑定；
+- 验收：网关对话后 `store_search`/`session_recall` 可命中转写。
 
 ## 6. 关键决策点（带推荐）
 

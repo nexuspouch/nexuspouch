@@ -321,7 +321,11 @@ impl McpServer {
             .get("space")
             .and_then(|v| v.as_str())
             .unwrap_or("artifacts");
-        if !protocol::is_valid_space(space) {
+        // Built-ins + well-known custom spaces (memory / sessions).
+        if !protocol::is_valid_space(space)
+            && space != "memory"
+            && space != "sessions"
+        {
             return Err(invalid_params(format!("bad space: {space}")));
         }
         let task = args
