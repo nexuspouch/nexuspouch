@@ -238,8 +238,6 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
         });
     }
 
-    let retention_device = batch.first().map(|p| p.u.device.clone());
-    let retention_space = batch.first().map(|p| p.u.space.clone());
     let manifest_payload = frame.payload.get("manifest").cloned();
     let publish = frame.payload_bool("publish");
     let producer = manifest_payload
@@ -322,59 +320,13 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
         );
     }
 
-    if !committed.is_empty() {
-        if let (Some(device), Some(space)) = (retention_device, retention_space) {
-            if let Some(retention) = frame.payload.get("retention") {
-                super::retention::apply_retention(local, &device, &space, retention);
-            }
-        }
-        // Task manifests (lineage) + publish protection.
-        let mut seen: Vec<(String, String, String)> = Vec::new();
-        for (space, device, task, _entry) in &manifest_commits {
-            let key = (space.clone(), device.clone(), task.clone());
-            if seen.contains(&key) {
-                continue;
-            }
-            seen.push(key.clone());
-            let files: Vec<Value> = manifest_commits
-                .iter()
-                .filter(|(s, d, t, _)| s == space && d == device && t == task)
-                .map(|(_, _, _, e)| e.clone())
-                .collect();
-            let _ = super::manifest::update(
-                local,
-                device,
-                space,
-                task,
-                &files,
-                manifest_payload.as_ref(),
-                publish,
-            );
-            if publish {
-                for (_, _, _, e) in &manifest_commits {
-                    if let Some(p) = e.get("path").and_then(|v| v.as_str()) {
-                        let _ = super::versions::mark_protected(local, space, device, p);
-                    }
-                }
-            }
-        }
-        for (space, device, _task, entry) in &manifest_commits {
-            if let (Some(p), Some(sha)) = (
-                entry.get("path").and_then(|v| v.as_str()),
-                entry.get("sha256").and_then(|v| v.as_str()),
-            ) {
-                let _ = super::handoff::on_commit(local, space, device, p, sha, publish);
-                if let Some(size) = entry.get("size").and_then(|v| v.as_i64()) {
-                    if let Some(ie) = super::index::index_entry_from_commit(
-                        local, space, device, p, sha, size, publish,
-                    ) {
-                        local.index_file(&ie);
-                    }
-                    super::index::maybe_summarize(local, space, device, p);
-                }
-            }
-        }
-    }
+    finish_committed(
+        local,
+        &manifest_commits,
+        publish,
+        manifest_payload.as_ref(),
+        frame.payload.get("retention"),
+    );
 
     let mut out = Map::new();
     out.insert("files".into(), Value::Array(committed.clone()));
@@ -388,6 +340,74 @@ pub fn commit(local: &Local, frame: &Frame, caller: &str) -> Result<Map<String, 
         }
     }
     Ok(out)
+}
+
+/// Post-commit hooks shared by `commit` and directory-binding `ingest`:
+/// retention, task manifests (lineage), publish protection, handoff state,
+/// search index, optional summary. Best-effort per subsystem.
+pub fn finish_committed(
+    local: &Local,
+    manifest_commits: &[(String, String, String, Value)],
+    publish: bool,
+    manifest_payload: Option<&Value>,
+    retention: Option<&Value>,
+) {
+    if manifest_commits.is_empty() {
+        return;
+    }
+    if let Some(retention) = retention {
+        if let (Some(device), Some(space)) = (
+            manifest_commits.first().map(|(_, d, _, _)| d.clone()),
+            manifest_commits.first().map(|(s, _, _, _)| s.clone()),
+        ) {
+            super::retention::apply_retention(local, &device, &space, retention);
+        }
+    }
+    let mut seen: Vec<(String, String, String)> = Vec::new();
+    for (space, device, task, _entry) in manifest_commits {
+        let key = (space.clone(), device.clone(), task.clone());
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key.clone());
+        let files: Vec<Value> = manifest_commits
+            .iter()
+            .filter(|(s, d, t, _)| s == space && d == device && t == task)
+            .map(|(_, _, _, e)| e.clone())
+            .collect();
+        let _ = super::manifest::update(
+            local,
+            device,
+            space,
+            task,
+            &files,
+            manifest_payload,
+            publish,
+        );
+        if publish {
+            for (_, _, _, e) in manifest_commits {
+                if let Some(p) = e.get("path").and_then(|v| v.as_str()) {
+                    let _ = super::versions::mark_protected(local, space, device, p);
+                }
+            }
+        }
+    }
+    for (space, device, _task, entry) in manifest_commits {
+        if let (Some(p), Some(sha)) = (
+            entry.get("path").and_then(|v| v.as_str()),
+            entry.get("sha256").and_then(|v| v.as_str()),
+        ) {
+            let _ = super::handoff::on_commit(local, space, device, p, sha, publish);
+            if let Some(size) = entry.get("size").and_then(|v| v.as_i64()) {
+                if let Some(ie) = super::index::index_entry_from_commit(
+                    local, space, device, p, sha, size, publish,
+                ) {
+                    local.index_file(&ie);
+                }
+                super::index::maybe_summarize(local, space, device, p);
+            }
+        }
+    }
 }
 
 fn file_sha_exact(path: &PathBuf) -> Result<(String, i64), OpError> {

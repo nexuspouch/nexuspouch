@@ -6,16 +6,15 @@
 //! fire automatically. v1 ingests by copy; reflink / hardlink modes are
 //! recorded for future use (M6 design §3).
 
-use super::{io_err, Local, OpError, MAX_CHUNK};
+use super::{io_err, Local, OpError};
+use crate::events::StoreEvent;
 use crate::protocol::{self, Frame};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use notify::Watcher as _;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -200,7 +199,16 @@ pub fn sync_binding(local: &Local, b: &Binding) -> BindingReport {
         } else {
             format!("{}/{}", b.folder, rel)
         };
-        match ingest_file(local, &b.space, &local.device_id, &dest_rel, full, size, &sha) {
+        match ingest_file(
+            local,
+            &b.space,
+            &local.device_id,
+            &dest_rel,
+            full,
+            size,
+            &sha,
+            &b.mode,
+        ) {
             Ok(()) => {
                 let existed = index.contains_key(rel);
                 index.insert(
@@ -371,54 +379,88 @@ fn ingest_file(
     src: &Path,
     size: i64,
     sha: &str,
+    mode: &str,
 ) -> Result<(), OpError> {
-    let mut begin = Map::new();
-    begin.insert("space".into(), json!(space));
-    begin.insert("path".into(), json!(dest_rel));
-    begin.insert("size".into(), json!(size));
-    begin.insert("sha256".into(), json!(sha));
-    let out = local.handle(
-        Frame::from_parts("write.begin", begin),
-        device,
-        protocol::TRUST_OWNER,
-        true,
-    )?;
-    let upload_id = out
-        .get("upload_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| OpError::new("internal", "missing upload_id"))?
-        .to_string();
-
-    let mut f = fs::File::open(src).map_err(io_err)?;
-    let mut buf = vec![0u8; MAX_CHUNK];
-    let mut offset: i64 = 0;
-    loop {
-        let n = f.read(&mut buf).map_err(io_err)?;
-        if n == 0 {
-            break;
-        }
-        let mut chunk = Map::new();
-        chunk.insert("upload_id".into(), json!(upload_id));
-        chunk.insert("offset".into(), json!(offset));
-        chunk.insert("data".into(), json!(STANDARD.encode(&buf[..n])));
-        local.handle(
-            Frame::from_parts("write.chunk", chunk),
-            device,
-            protocol::TRUST_OWNER,
-            true,
-        )?;
-        offset += n as i64;
+    let dest = local
+        .root
+        .join(device)
+        .join(space)
+        .join(dest_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(io_err)?;
     }
-    let mut commit = Map::new();
-    commit.insert("space".into(), json!(space));
-    commit.insert("upload_ids".into(), json!([upload_id]));
-    local.handle(
-        Frame::from_parts("commit", commit),
-        device,
-        protocol::TRUST_OWNER,
-        true,
-    )?;
+    // Archive the previous version (reuses versions/keep_last machinery).
+    if dest.exists() {
+        super::versions::archive_old(local, space, device, dest_rel, sha, None)?;
+    }
+    // Materialize per mode: reflink (auto) > hardlink (immutable) > copy.
+    match mode {
+        "hardlink-immutable" => {
+            if fs::hard_link(src, &dest).is_err() {
+                fs::copy(src, &dest).map_err(io_err)?;
+            }
+        }
+        "auto" => {
+            if !reflink_copy(src, &dest) {
+                fs::copy(src, &dest).map_err(io_err)?;
+            }
+        }
+        _ => {
+            fs::copy(src, &dest).map_err(io_err)?;
+        }
+    }
+    // Content verification (hardlink shares the inode; copy/reflink reads dest).
+    let (sum, _) = super::browse::file_sha(&dest);
+    if sum != sha {
+        let _ = fs::remove_file(&dest);
+        return Err(OpError::new("hash_mismatch", "binding ingest hash mismatch"));
+    }
+    // Hooks (lineage / handoff / index) via the shared finish_committed path.
+    let task = super::manifest::task_root(dest_rel).unwrap_or_default();
+    let entry = json!({
+        "path": dest_rel,
+        "size": size,
+        "sha256": sha,
+        "version": 1,
+    });
+    let commits = vec![(space.to_string(), device.to_string(), task, entry.clone())];
+    super::write::finish_committed(local, &commits, false, None, None);
+    local.emit_event(
+        StoreEvent::new("commit", device)
+            .with_uri(format!("store://{space}/{device}/{dest_rel}"))
+            .with_path(space, dest_rel)
+            .with_detail(Map::from_iter([
+                ("size".into(), json!(size)),
+                ("sha256".into(), json!(sha)),
+                ("ingest".into(), json!(true)),
+                ("mode".into(), json!(mode)),
+            ])),
+    );
     Ok(())
+}
+
+/// Reflink copy (CoW, zero-copy on APFS/btrfs/xfs) via `cp`; falls back to
+/// `false` so callers use a plain copy.
+#[cfg(target_os = "macos")]
+fn reflink_copy(src: &Path, dest: &Path) -> bool {
+    std::process::Command::new("cp")
+        .arg("-c")
+        .arg(src)
+        .arg(dest)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reflink_copy(src: &Path, dest: &Path) -> bool {
+    std::process::Command::new("cp")
+        .arg("--reflink=auto")
+        .arg(src)
+        .arg(dest)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn mtime_ms(meta: &fs::Metadata) -> i64 {
@@ -520,5 +562,41 @@ mod tests {
         let r = sync_binding(&local, &b);
         assert!(!r.errors.is_empty());
         assert!(r.errors[0].contains("not found"));
+    }
+
+    #[test]
+    fn binding_hardlink_immutable_no_duplicate_storage() {
+        let dir = tempdir().unwrap();
+        let local = make_local(dir.path());
+        let ext = tempdir().unwrap();
+        let registry = BindingsRegistry::open(dir.path());
+        let b = registry
+            .add(
+                "hl",
+                ext.path().to_str().unwrap(),
+                "files",
+                "hl",
+                "hardlink-immutable",
+                vec![],
+            )
+            .unwrap();
+        fs::write(ext.path().join("big.bin"), vec![7u8; 64 * 1024]).unwrap();
+
+        let r = sync_binding(&local, &b);
+        assert_eq!(r.added, 1);
+        assert!(r.errors.is_empty());
+
+        // Same inode => no duplicate storage.
+        use std::os::unix::fs::MetadataExt;
+        let ext_ino = fs::metadata(ext.path().join("big.bin")).unwrap().ino();
+        let store_ino = fs::metadata(store_file(dir.path(), "hl/big.bin"))
+            .unwrap()
+            .ino();
+        assert_eq!(ext_ino, store_ino);
+
+        // Hooks fired: version store has the ingested file.
+        let versions =
+            crate::store::versions::all_versions(&local, "files", DEV, "hl/big.bin").unwrap();
+        assert_eq!(versions.len(), 1);
     }
 }

@@ -2,8 +2,10 @@
 
 > 状态：设计稿 v0.1（2026-08-01）
 > 实现状态：M6a（App 目录绑定服务 + 管理页 UI）+ M6b（节点 `--bind` +
-> notify 事件驱动 watcher + 60s 周期兜底）已落地（2026-08-02）；
-> reflink/hardlink 摄取为后续增强（需扩展 commit 写路径）。
+> notify 事件驱动 watcher + 60s 周期兜底 + **reflink/hardlink 摄取**）已落地
+> （2026-08-02）：`hardlink-immutable` 同 inode 零拷贝；`auto` 走 `cp -c`
+> （APFS）/ `cp --reflink=auto`（btrfs/xfs）CoW，失败降级 copy；
+> 摄取复用 commit 后处理（版本/血缘/索引钩子全触发）。
 > 关联：[storage_space_plan.md](storage_space_plan.md)（设备目录模型）、
 > [storage_protocol_spec.md](storage_protocol_spec.md) §2（写路径收敛）、
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)（M0-M5 已落地）
