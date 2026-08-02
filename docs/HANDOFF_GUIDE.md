@@ -37,7 +37,7 @@
 | F 运维/QA（真机、vitest Node24） | QA_BASELINE.md + DEVICE_TESTING.md；vitest 在 agent-bridge 仓库 | 真机需硬件 |
 | G 快照管理薄层 | **未成文，先补设计**（建议并入 SPACE_BOUNDARY_DESIGN 或独立文档） | 只有讨论记录 |
 | H 向量搜索 P1-P3 | VECTOR_SEARCH_DESIGN.md（已定稿） | 按里程碑推进 |
-| I 会话历史管理 P1-P3 | SESSION_HISTORY_DESIGN.md（已定稿） | 依赖 H P1（P2 语义召回） |
+| I 会话历史管理（P1-P3 已落地） | SESSION_HISTORY_DESIGN.md + BACKLOG I | 剩余：**P1.5 Web 会话管理 UI**（主打卖点） |
 
 ## 3. 工作规则（红线）
 
