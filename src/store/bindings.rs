@@ -748,8 +748,8 @@ fn ingest_file(
     Ok(())
 }
 
-/// Reflink copy (CoW, zero-copy on APFS/btrfs/xfs) via `cp`; falls back to
-/// `false` so callers use a plain copy.
+/// Reflink copy (CoW) via `cp` on Unix; Windows/NTFS has no CoW → always false
+/// so callers fall back to plain `fs::copy`.
 #[cfg(target_os = "macos")]
 fn reflink_copy(src: &Path, dest: &Path) -> bool {
     std::process::Command::new("cp")
@@ -761,7 +761,7 @@ fn reflink_copy(src: &Path, dest: &Path) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn reflink_copy(src: &Path, dest: &Path) -> bool {
     std::process::Command::new("cp")
         .arg("--reflink=auto")
@@ -770,6 +770,11 @@ fn reflink_copy(src: &Path, dest: &Path) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn reflink_copy(_src: &Path, _dest: &Path) -> bool {
+    false
 }
 
 fn mtime_ms(meta: &fs::Metadata) -> i64 {
@@ -984,14 +989,22 @@ mod tests {
         let r = sync_binding(&local, &b);
         assert_eq!(r.added, 1);
         assert!(r.errors.is_empty());
+        assert!(store_file(dir.path(), "hl/big.bin").is_file());
 
-        // Same inode => no duplicate storage.
-        use std::os::unix::fs::MetadataExt;
-        let ext_ino = fs::metadata(ext.path().join("big.bin")).unwrap().ino();
-        let store_ino = fs::metadata(store_file(dir.path(), "hl/big.bin"))
-            .unwrap()
-            .ino();
-        assert_eq!(ext_ino, store_ino);
+        // Same inode => no duplicate storage (Unix). Windows hardlink shares
+        // the file id but MetadataExt is Unix-only; content check covers both.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let ext_ino = fs::metadata(ext.path().join("big.bin")).unwrap().ino();
+            let store_ino = fs::metadata(store_file(dir.path(), "hl/big.bin"))
+                .unwrap()
+                .ino();
+            assert_eq!(ext_ino, store_ino);
+        }
+        let (sha_ext, _) = crate::store::browse::file_sha(&ext.path().join("big.bin"));
+        let (sha_store, _) = crate::store::browse::file_sha(&store_file(dir.path(), "hl/big.bin"));
+        assert_eq!(sha_ext, sha_store);
 
         // Hooks fired: version store has the ingested file.
         let versions =

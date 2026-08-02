@@ -7,7 +7,7 @@ Wire format is compatible with the ShePaw Flutter app (`Noise_IK_25519_ChaChaPol
 ## Requirements
 
 - Rust 1.70+ (edition 2021)
-- macOS / Linux (Unix filesystem semantics)；Windows 支持进行中（[docs/WINDOWS_SUPPORT.md](docs/WINDOWS_SUPPORT.md)）
+- macOS / Linux / Windows（W1 基础可用进行中，见 [docs/WINDOWS_SUPPORT.md](docs/WINDOWS_SUPPORT.md)）
 
 ## Build
 

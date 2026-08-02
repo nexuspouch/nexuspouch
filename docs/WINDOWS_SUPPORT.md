@@ -1,10 +1,14 @@
 # Windows 节点支持设计（Windows Support）
 
-> 状态：方案 v0.1（2026-08-02）
+> 状态：W1 进行中（2026-08-02，分支 `codex/windows-w1`）
 > 决策：**支持 Windows 作为 Nexuspouch 节点的一等目标**——用闲置 PC
 > （主流用户为 Windows）当 master 是常见场景。
 > 范围：仅 Nexuspouch（Rust）节点服务；ShePaw App 桌面端（Flutter）与
 > channel（Go）本就跨平台。
+>
+> W1 已做：路径盘符/UNC/`\\?\`/`//server` 拒绝（双端 fixture）；
+> Windows 上 `reflink_copy` 直接降级；hardlink 测试去 Unix-only 断言；
+> `libc` 仅 unix 依赖；CI matrix 含 `windows-latest`。
 
 ## 1. 现状与缺口
 
@@ -25,10 +29,12 @@
 
 ### W1 基础可用
 
-- Windows 上编译 + 基础功能可用：配对（Noise WS）/ mDNS 发现 / store 读写 /
-  admin UI / WebDAV / MCP；
-- CI 增加 Windows runner，`cargo test` 全绿（含 fixture 契约测试）；
-- 路径语义核对：盘符/UNC 拒绝逻辑在 Windows 语义下验证，store 相对路径不受影响。
+| 项 | 状态 |
+|----|------|
+| 路径语义（盘符 / UNC / `\\?\` / `//server` / 根相对 `\`） | ✅ fixture + 单元测试；Dart 对齐 |
+| Windows 编译障碍（`cp --reflink`、unix MetadataExt 测试、libc） | ✅ |
+| CI `windows-latest` + `cargo test --lib` | ✅ workflow 已加（待 Actions 跑绿确认） |
+| 配对 / mDNS / store / admin / WebDAV / MCP 真机 | 待 Windows runner 绿后抽测 |
 
 ### W2 完整特性
 

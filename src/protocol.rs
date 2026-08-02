@@ -60,12 +60,23 @@ pub fn is_valid_device_id(device: &str) -> bool {
             .all(|c| matches!(c, '0'..='9' | 'a'..='f'))
 }
 
+/// Reject Windows drive letters, UNC, and extended-path prefixes.
+/// Store paths are always relative and use `/` after normalization.
 fn is_drive_or_unc(raw: &str) -> bool {
     let bytes = raw.as_bytes();
+    // `C:` / `C:\` / `C:/`
     if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
         return true;
     }
-    raw.starts_with("\\\\")
+    // `\\server\share`, `\\?\C:\...`, `\\.\...`
+    if raw.starts_with("\\\\") {
+        return true;
+    }
+    // Forward-slash UNC: `//server/share/...`
+    if raw.starts_with("//") {
+        return true;
+    }
+    false
 }
 
 pub fn is_valid_space(s: &str) -> bool {
@@ -84,7 +95,8 @@ pub fn normalize_path(raw: &str) -> Result<String, String> {
     if raw.contains('\0') {
         return Err("NUL in path".into());
     }
-    if raw.starts_with('/') || raw.starts_with('~') {
+    // Unix absolute, home, or Windows root-relative (`\Windows\...`).
+    if raw.starts_with('/') || raw.starts_with('~') || raw.starts_with('\\') {
         return Err("absolute path".into());
     }
     if is_drive_or_unc(raw) {
@@ -269,6 +281,22 @@ mod tests {
             let got = normalize_path(inp).unwrap_or_else(|e| panic!("normalize {inp:?}: {e}"));
             assert_eq!(got, want, "normalize {inp:?}");
         }
+    }
+
+    #[test]
+    fn windows_path_shapes_rejected() {
+        for p in [
+            r"C:\Users\me\file.txt",
+            "C:/Users/me/file.txt",
+            r"\\server\share\a",
+            r"\\?\C:\secret",
+            "//server/share/a",
+            r"\Windows\System32\config",
+        ] {
+            assert!(normalize_path(p).is_err(), "expected reject: {p:?}");
+        }
+        // Relative segments with backslashes remain OK (normalized to `/`).
+        assert_eq!(normalize_path(r"a\b\c.txt").unwrap(), "a/b/c.txt");
     }
 
     #[test]
