@@ -1,8 +1,8 @@
 # Agent 会话历史管理设计（Session History）
 
-> 状态：P1–P3 骨架已落地（2026-08-02）——`sessions` 空间 + strict 清洗 +
-> `--bind`；MCP `session_recall`；网关 transcript 旁路（debounce 写 jsonl）。
-> 格式适配器 / 消息级分块仍可增强。
+> 状态：P1–P3 + 适配增强（2026-08-02，`codex/sessions-adapt`）——`sessions`
+> 空间 + strict 清洗 + `--bind`；MCP `session_recall`；网关 transcript 旁路；
+> 格式适配器（claude/codex/acp/generic）+ 消息级 embedding 分块已落地。
 > 定位：把各 agent 的会话历史纳入 Nexuspouch 管理——跨设备备份、版本化、
 > 全文与语义召回。会话历史是记忆层的最大数据源，与
 > [VECTOR_SEARCH_DESIGN.md](VECTOR_SEARCH_DESIGN.md) 直接衔接。

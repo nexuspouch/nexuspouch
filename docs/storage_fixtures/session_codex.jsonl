@@ -1,0 +1,2 @@
+{"type":"response_item","timestamp":"2026-05-16T08:33:00.000Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"please fix the bug in auth"}]}}
+{"type":"response_item","timestamp":"2026-05-16T08:33:10.000Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The token expiry check used the wrong clock; I fixed it."}]}}

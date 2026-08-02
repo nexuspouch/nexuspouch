@@ -14,6 +14,7 @@ pub mod migrate_seed;
 pub mod reprotect;
 pub mod retention;
 pub mod sanitize;
+pub mod session_adapt;
 pub mod snapshot_crypto;
 pub mod spaces;
 pub mod rrf;
@@ -370,9 +371,17 @@ impl Local {
     }
 
     pub fn index_file(&self, e: &index::IndexEntry) {
-        // Session transcripts: scrub before FTS/vector; raw file on disk unchanged.
+        // Session transcripts: adapt formats → scrub → FTS; raw file on disk unchanged.
         let mut e = e.clone();
+        let mut session_chunks: Option<Vec<String>> = None;
         if e.space == spaces::SESSIONS_SPACE {
+            let adapted = session_adapt::adapt_transcript(&e.body, &e.path);
+            if !adapted.fts_body.is_empty() {
+                e.body = adapted.fts_body;
+            }
+            if !adapted.chunks.is_empty() {
+                session_chunks = Some(adapted.chunks);
+            }
             let mode = std::env::var("NEXUSPOUCH_SESSIONS_SCRUB")
                 .unwrap_or_else(|_| "strict".into())
                 .to_lowercase();
@@ -381,15 +390,24 @@ impl Local {
                 if let Some(sum) = e.summary.take() {
                     e.summary = Some(sanitize::scrub_strict(&sum));
                 }
+                if let Some(chunks) = session_chunks.as_mut() {
+                    for c in chunks.iter_mut() {
+                        *c = sanitize::scrub_strict(c);
+                    }
+                }
             }
         }
         self.index.index_file(&e);
-        let text = format!(
-            "{} {}",
-            e.summary.as_deref().unwrap_or(""),
-            e.body
-        );
-        self.vector.upsert_text(&e.uri, text.trim());
+        if let Some(chunks) = session_chunks {
+            self.vector.upsert_chunks(&e.uri, &chunks);
+        } else {
+            let text = format!(
+                "{} {}",
+                e.summary.as_deref().unwrap_or(""),
+                e.body
+            );
+            self.vector.upsert_text(&e.uri, text.trim());
+        }
     }
 
     pub fn remove_index(&self, uri: &str) {

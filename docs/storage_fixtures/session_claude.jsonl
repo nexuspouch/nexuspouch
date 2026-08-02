@@ -1,0 +1,2 @@
+{"type":"user","uuid":"u1","timestamp":"2026-05-16T08:00:00.000Z","message":{"role":"user","content":"how do I deploy the service?"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-05-16T08:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Build with cargo then restart the systemd unit."}]}}

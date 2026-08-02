@@ -39,35 +39,46 @@ impl VectorIndex {
 
     /// Embed and upsert chunk 0 for a document (summary/body already prepared).
     pub fn upsert_text(&self, uri: &str, text: &str) {
+        self.upsert_chunks(uri, &[text.to_string()]);
+    }
+
+    /// Replace all embedding chunks for `uri` (session message packing, etc.).
+    pub fn upsert_chunks(&self, uri: &str, chunks: &[String]) {
         if !self.embedder.available() {
             return;
         }
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
+        let prepared: Vec<String> = chunks
+            .iter()
+            .map(|c| c.trim())
+            .filter(|c| !c.is_empty())
+            .map(|c| c.chars().take(4000).collect())
+            .collect();
+        if prepared.is_empty() {
             return;
         }
-        // Cap input: prefer head of text (summary+body already truncated upstream).
-        let slice: String = trimmed.chars().take(4000).collect();
-        let Ok(vec) = self.embedder.embed(&slice) else {
-            return;
-        };
-        let blob = embed::packing(&vec);
         let Ok(mut guard) = self.conn.lock() else {
             return;
         };
         let Some(conn) = guard.as_mut() else {
             return;
         };
+        let _ = conn.execute("DELETE FROM embeddings WHERE uri = ?1", params![uri]);
         let now = now_ms();
-        let _ = conn.execute(
-            "INSERT INTO embeddings(uri, chunk_index, embedding, model, created_ms)
-             VALUES(?1, 0, ?2, ?3, ?4)
-             ON CONFLICT(uri, chunk_index) DO UPDATE SET
-               embedding=excluded.embedding,
-               model=excluded.model,
-               created_ms=excluded.created_ms",
-            params![uri, blob, self.embedder.name(), now],
-        );
+        for (i, slice) in prepared.iter().enumerate() {
+            let Ok(vec) = self.embedder.embed(slice) else {
+                continue;
+            };
+            let blob = embed::packing(&vec);
+            let _ = conn.execute(
+                "INSERT INTO embeddings(uri, chunk_index, embedding, model, created_ms)
+                 VALUES(?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(uri, chunk_index) DO UPDATE SET
+                   embedding=excluded.embedding,
+                   model=excluded.model,
+                   created_ms=excluded.created_ms",
+                params![uri, i as i64, blob, self.embedder.name(), now],
+            );
+        }
     }
 
     pub fn remove(&self, uri: &str) {

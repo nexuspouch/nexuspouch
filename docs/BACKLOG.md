@@ -84,8 +84,8 @@
 
 | 项 | 状态 | 依赖 |
 |----|------|------|
-| P1：`sessions` 空间 + 格式适配层 + 文件级摄取（复用 M6 绑定）+ FTS5 全文 + 敏感清洗（strict 默认） | ✅ 骨架（空间+strict 清洗+bind；适配器/debounce 待增强） | SESSION_HISTORY_DESIGN.md |
-| P2：会话语义召回（分块 embedding + `session_recall` MCP） | ✅ 薄层（`session_recall`→sessions hybrid；分块策略可增强） | H 向量 + sessions 空间 |
+| P1：`sessions` 空间 + 格式适配层 + 文件级摄取（复用 M6 绑定）+ FTS5 全文 + 敏感清洗（strict 默认） | ✅（`session_adapt`：claude/codex/acp/generic + fixture） | SESSION_HISTORY_DESIGN.md |
+| P2：会话语义召回（分块 embedding + `session_recall` MCP） | ✅（消息级 `upsert_chunks` + `session_recall` hybrid） | H 向量 + sessions 空间 |
 | P3：agent-bridge 网关 transcript 实时旁路捕获 | ✅（`SessionTranscriptSink` debounce → sessions） | NEXUSPOUCH_URL/DEVICE/TOKEN |
 
 设计要点：会话历史是记忆层最大数据源；`sessions` 空间默认 private +

@@ -1,0 +1,2 @@
+{"agent":"acp-proxy","session_id":"sess-1","seq":1,"ts_ms":1721300000000,"role":"user","content":"hello how do I deploy"}
+{"agent":"acp-proxy","session_id":"sess-1","seq":2,"ts_ms":1721300001000,"role":"assistant","content":"Use cargo build --release then scp the binary."}
