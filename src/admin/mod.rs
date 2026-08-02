@@ -49,6 +49,8 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/index/rebuild", post(index_rebuild))
         .route("/spaces", get(spaces_list))
         .route("/spaces", post(spaces_declare))
+        .route("/bindings", get(bindings_list))
+        .route("/bindings/sync", post(bindings_sync))
         .route("/reprotect", post(reprotect))
         .with_state(state.clone());
 
@@ -413,6 +415,14 @@ async fn spaces_declare(
         )
     })
     .await
+}
+
+async fn bindings_list(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    auth_json(state, headers, None, handler::bindings_list).await
+}
+
+async fn bindings_sync(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    auth_json(state, headers, None, handler::bindings_sync).await
 }
 
 #[derive(Deserialize, Default)]

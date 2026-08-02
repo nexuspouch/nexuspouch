@@ -354,6 +354,34 @@ pub fn spaces_declare(
     )
 }
 
+pub fn bindings_list(state: &AdminState) -> Result<Map<String, Value>, OpError> {
+    let registry = crate::store::bindings::BindingsRegistry::open(&state.store.root);
+    let bindings: Vec<Value> = registry
+        .list()
+        .iter()
+        .map(|b| {
+            json!({
+                "id": b.id,
+                "label": b.label,
+                "external": b.external,
+                "space": b.space,
+                "folder": b.folder,
+                "mode": b.mode,
+                "ignore": b.ignore,
+            })
+        })
+        .collect();
+    Ok(Map::from_iter([("bindings".into(), Value::Array(bindings))]))
+}
+
+pub fn bindings_sync(state: &AdminState) -> Result<Map<String, Value>, OpError> {
+    let reports = crate::store::bindings::sync_all(&state.store);
+    Ok(Map::from_iter([(
+        "reports".into(),
+        Value::Array(reports.iter().map(|r| r.to_json()).collect()),
+    )]))
+}
+
 pub fn tokens_revoke(state: &AdminState, id: String) -> Result<Map<String, Value>, OpError> {
     let store = state
         .auth
