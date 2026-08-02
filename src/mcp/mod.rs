@@ -234,13 +234,14 @@ impl McpServer {
                 },
                 {
                     "name": "store_search",
-                    "description": "Full-text search over artifacts/files (SQLite FTS5, phrase match). Returns uri/path/size/state/snippet/score.",
+                    "description": "Search artifacts/files (FTS5 keyword; set semantic=true for vector recall with keyword fallback).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "q": {"type": "string"},
                             "space": {"type": "string"},
-                            "limit": {"type": "integer", "default": 50}
+                            "limit": {"type": "integer", "default": 50},
+                            "semantic": {"type": "boolean", "default": false}
                         },
                         "required": ["q"]
                     }
@@ -491,15 +492,15 @@ impl McpServer {
             .get("limit")
             .and_then(|v| v.as_u64())
             .unwrap_or(50) as usize;
+        let semantic = args
+            .get("semantic")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let out = self
             .client
-            .search(q, space, None, None, limit)
+            .search_ex(q, space, None, None, limit, semantic)
             .map_err(map_store_err)?;
-        Ok(json!({
-            "query": q,
-            "total": out.get("total").cloned().unwrap_or(json!(0)),
-            "results": out.get("results").cloned().unwrap_or(json!([])),
-        }))
+        Ok(out)
     }
 
     fn store_watch(&self, args: &Value) -> Result<Value, RpcError> {

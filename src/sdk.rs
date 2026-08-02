@@ -121,6 +121,18 @@ impl Client {
         state: Option<&str>,
         limit: usize,
     ) -> Result<Value, String> {
+        self.search_ex(q, space, device, state, limit, false)
+    }
+
+    pub fn search_ex(
+        &self,
+        q: &str,
+        space: Option<&str>,
+        device: Option<&str>,
+        state: Option<&str>,
+        limit: usize,
+        semantic: bool,
+    ) -> Result<Value, String> {
         let mut url = format!("{}/api/v1/search?q={}", self.base, urlencoding(q));
         if let Some(s) = space {
             url.push_str(&format!("&space={}", urlencoding(s)));
@@ -132,6 +144,9 @@ impl Client {
             url.push_str(&format!("&state={}", urlencoding(st)));
         }
         url.push_str(&format!("&limit={}", limit.max(1)));
+        if semantic {
+            url.push_str("&semantic=true");
+        }
         self.get_json(&url)
     }
 

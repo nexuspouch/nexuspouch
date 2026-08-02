@@ -1,8 +1,12 @@
 # 向量搜索设计（Vector Search）
 
-> 状态：设计稿 v0.1（2026-08-02）
+> 状态：P1 骨架已落地（2026-08-02，分支 `codex/vector-p1`）
 > 核心决策：**向量能力绑定 master（常开 PC/NAS）**；手机只做客户端查询，
 > 不在移动端保存模型/索引/embedding。默认本地 embedding，远程 API 仅显式可选。
+>
+> P1 实现备注：默认 embedder 为离线 `local-hash-v0`（特征哈希，保隐私、免下模型）；
+> 配置 `NEXUSPOUCH_EMBED_URL` 走远程；`NEXUSPOUCH_EMBED=off` 强制降级 FTS5。
+> ONNX bge-small 替换为后续增量。
 
 ## 0. 结论摘要
 

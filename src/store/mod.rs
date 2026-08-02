@@ -1,6 +1,7 @@
 pub mod browse;
 pub mod bindings;
 pub mod cursors;
+pub mod embed;
 pub mod gc;
 pub mod handoff;
 pub mod index;
@@ -13,6 +14,7 @@ pub mod reprotect;
 pub mod retention;
 pub mod snapshot_crypto;
 pub mod spaces;
+pub mod vector;
 pub mod versions;
 pub mod volume;
 pub mod write;
@@ -81,6 +83,7 @@ pub struct Local {
     peer_ensure: Mutex<Option<Arc<dyn PeerEnsure>>>,
     event_bus: Mutex<Option<Arc<EventBus>>>,
     index: index::SearchIndex,
+    vector: vector::VectorIndex,
     spaces: spaces::SpaceRegistry,
     audit: AuditLog,
 }
@@ -108,6 +111,7 @@ impl Local {
             peer_ensure: Mutex::new(None),
             event_bus: Mutex::new(None),
             index: index::SearchIndex::open(&root),
+            vector: vector::VectorIndex::open(&root, embed::from_env()),
             spaces: spaces::SpaceRegistry::open(&root),
             audit: AuditLog::open(&root),
         };
@@ -346,10 +350,18 @@ impl Local {
 
     pub fn index_file(&self, e: &index::IndexEntry) {
         self.index.index_file(e);
+        // Vector side: prefer summary + body text already on the index entry.
+        let text = format!(
+            "{} {}",
+            e.summary.as_deref().unwrap_or(""),
+            e.body
+        );
+        self.vector.upsert_text(&e.uri, text.trim());
     }
 
     pub fn remove_index(&self, uri: &str) {
         self.index.remove(uri);
+        self.vector.remove(uri);
     }
 
     pub fn search_index(
@@ -363,6 +375,52 @@ impl Local {
         self.index
             .search(q, space, device, state, limit)
             .map_err(|e| OpError::new("internal", e))
+    }
+
+    /// Keyword and/or semantic search. When `semantic` and the embedder is
+    /// unavailable / empty, falls back to FTS5 with `degraded: true`.
+    pub fn search_query(
+        &self,
+        q: &str,
+        space: Option<&str>,
+        device: Option<&str>,
+        state: Option<&str>,
+        limit: usize,
+        semantic: bool,
+    ) -> Result<Map<String, Value>, OpError> {
+        if semantic {
+            match self.vector.search(q, space, device, limit) {
+                Ok(results) if !results.is_empty() => {
+                    return Ok(Map::from_iter([
+                        ("query".into(), json!(q)),
+                        ("total".into(), json!(results.len())),
+                        ("results".into(), json!(results)),
+                        ("score_type".into(), json!("vector")),
+                        ("degraded".into(), json!(false)),
+                        ("embedder".into(), json!(self.vector.embedder_name())),
+                    ]));
+                }
+                Ok(_) | Err(_) => {
+                    let results = self.search_index(q, space, device, state, limit)?;
+                    return Ok(Map::from_iter([
+                        ("query".into(), json!(q)),
+                        ("total".into(), json!(results.len())),
+                        ("results".into(), json!(results)),
+                        ("score_type".into(), json!("keyword")),
+                        ("degraded".into(), json!(true)),
+                        ("embedder".into(), json!(self.vector.embedder_name())),
+                    ]));
+                }
+            }
+        }
+        let results = self.search_index(q, space, device, state, limit)?;
+        Ok(Map::from_iter([
+            ("query".into(), json!(q)),
+            ("total".into(), json!(results.len())),
+            ("results".into(), json!(results)),
+            ("score_type".into(), json!("keyword")),
+            ("degraded".into(), json!(false)),
+        ]))
     }
 
     fn op_search(&self, frame: &Frame) -> Result<Map<String, Value>, OpError> {
@@ -391,12 +449,12 @@ impl Local {
         let limit = any_to_i64(frame.payload.get("limit").unwrap_or(&Value::Null))
             .unwrap_or(50)
             .clamp(1, 200) as usize;
-        let results = self.search_index(q, space, device, state, limit)?;
-        Ok(Map::from_iter([
-            ("query".into(), json!(q)),
-            ("total".into(), json!(results.len())),
-            ("results".into(), json!(results)),
-        ]))
+        let semantic = frame
+            .payload
+            .get("semantic")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        self.search_query(q, space, device, state, limit, semantic)
     }
 
     fn op_events_list(&self, frame: &Frame) -> Result<Map<String, Value>, OpError> {

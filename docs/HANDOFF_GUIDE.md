@@ -101,4 +101,5 @@
    余 rename/FFI/App watcher、网关注入仍待；
 4. **P3（需决策）**：E——Dart master 服务端、Windows；
 5. **P4（不承诺）**：A、G——空间配额、快照薄层（先讨论后投入）；
-6. **新方向**：H——向量搜索按 VECTOR_SEARCH_DESIGN.md 的 P1-P3 推进。
+6. **新方向**：H——向量 P1 骨架在 `codex/vector-p1`（local-hash + semantic 降级）；
+   ONNX / memory 空间 / RRF 仍待。

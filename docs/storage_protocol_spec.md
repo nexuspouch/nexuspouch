@@ -275,10 +275,13 @@ App 经 Noise 配对调用，与 HTTP `/api/v1/search`、`/api/v1/events*` 语�
 
 ```json
 // 全文检索（FTS5；q 必填非空）
-{"op": "search", "q": "关键词", "space": "artifacts", "device": "…", "state": "…", "limit": 50}
-→ {"op": "result", "data": {"query": "关键词", "total": 1, "results": [
+{"op": "search", "q": "关键词", "space": "artifacts", "device": "…", "state": "…",
+ "limit": 50, "semantic": false}
+→ {"op": "result", "data": {"query": "关键词", "total": 1, "score_type": "keyword",
+    "degraded": false, "results": [
     {"uri": "store://…", "space": "artifacts", "device": "…", "path": "…",
      "sha256": "…", "size": 35, "state": "committed", "snippet": "…", "score": -1.0}]}}
+// semantic:true → 向量召回；不可用时回退 keyword 且 degraded:true
 
 // 事件列表（seq > since；升序；可选 kind 过滤）
 {"op": "events.list", "since": 0, "limit": 50, "kind": "handoff.created"}

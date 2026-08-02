@@ -295,6 +295,8 @@ struct SearchQuery {
     state: Option<String>,
     #[serde(default = "default_search_limit")]
     limit: usize,
+    #[serde(default)]
+    semantic: bool,
 }
 
 fn default_search_limit() -> usize {
@@ -320,19 +322,15 @@ async fn search_uri(
     ) {
         return resp;
     }
-    match state.store.search_index(
+    match state.store.search_query(
         &q.q,
         q.space.as_deref(),
         q.device.as_deref(),
         q.state.as_deref(),
         q.limit,
+        q.semantic,
     ) {
-        Ok(results) => Json(json!({
-            "query": q.q,
-            "total": results.len(),
-            "results": results,
-        }))
-        .into_response(),
+        Ok(out) => Json(Value::Object(out)).into_response(),
         Err(e) => op_error(e),
     }
 }
