@@ -32,7 +32,7 @@
 | A 空间配额/按空间导入授权（Step 3） | SPACE_BOUNDARY_DESIGN.md（Step 3）+ spec §0.5 | 预留不承诺，先讨论 |
 | B M6 绑定增强（rename/半写/上限/原生 reflink） | M6_FOLDER_BINDING.md §3-§6、§13 | 核心已落地，增强项 |
 | C ShePaw App 消费 UI（版本/交接通知/搜索/agents） | [APP_CONSUMER_UI.md](APP_CONSUMER_UI.md) + spec §2.11 + shepaw 现有实现 | 最小设计已补；实现按该文档切片 |
-| D agent-bridge/MCP（网关注入/handoff 透传/订阅） | agent-bridge 仓库 README + examples/mcp + store-tools.ts + AGENTS.md | 跨仓库 |
+| D agent-bridge/MCP（网关注入/handoff 透传/订阅/深链） | agent-bridge 仓库 README + examples/mcp + store-tools.ts + AGENTS.md + PRODUCT_BOUNDARY.md | 跨仓库；深链后置 |
 | E 双端缺口（Dart master 服务端、Windows） | spec v4.3 + SPACE_BOUNDARY_DESIGN.md + WINDOWS_SUPPORT.md | Dart master 服务端已决策**不实现**（master 能力归 Nexuspouch，App 仅客户端，手机 master 降级）；Windows **已决策支持**（W1-W3） |
 | F 运维/QA（真机、vitest Node24） | QA_BASELINE.md + DEVICE_TESTING.md；vitest 在 agent-bridge 仓库 | 真机需硬件 |
 | G 快照管理薄层 | **未成文，先补设计**（建议并入 SPACE_BOUNDARY_DESIGN 或独立文档） | 只有讨论记录 |

@@ -121,6 +121,7 @@ Nexuspouch 面向 AI agent 协作：agent 拿到 `store://` URI 即可读写、�
 - **向量搜索设计**：[docs/VECTOR_SEARCH_DESIGN.md](docs/VECTOR_SEARCH_DESIGN.md)（master 侧能力 + 本地 embedding + memory 空间）
 - **交接说明**：[docs/HANDOFF_GUIDE.md](docs/HANDOFF_GUIDE.md)（接手者必读：文档映射 + 红线 + DoD）
 - **会话历史管理**：[docs/SESSION_HISTORY_DESIGN.md](docs/SESSION_HISTORY_DESIGN.md)（sessions 空间 + 语义召回 + 网关旁路）
+- **产品边界**：[docs/PRODUCT_BOUNDARY.md](docs/PRODUCT_BOUNDARY.md)（agent-hub 控制面 ⇄ Nexuspouch 数据面分工）
 
 ## Development
 

@@ -45,6 +45,7 @@
 | acp-proxy 网关工具管线正式注入 store 工具（`store-tools.ts` 已就绪） | ✅ | `NEXUSPOUCH_ROOT` → session MCP stdio 注入 |
 | MCP `store_write` 透传 `context` / `to_agent` 走 handoff（M3 语义） | ✅ | Nexuspouch MCP + agent-bridge store-tools |
 | MCP `store://` 资源订阅（subscribe） | ✅（`resources/subscribe` + 轮询 `notifications/resources/updated`；仍可用 `store_watch`） | MCP 协议 |
+| hub↔Nexuspouch 深链（会话进程 ⇄ 会话内容互相跳转，共享 device/agent 身份） | 待实现（后置，见 PRODUCT_BOUNDARY.md） | Nexuspouch 会话 Web UI（I P1.5） |
 
 ## E. 协议 / 双端实现缺口
 
