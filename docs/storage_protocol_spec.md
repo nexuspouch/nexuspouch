@@ -276,12 +276,15 @@ App 经 Noise 配对调用，与 HTTP `/api/v1/search`、`/api/v1/events*` 语�
 ```json
 // 全文检索（FTS5；q 必填非空）
 {"op": "search", "q": "关键词", "space": "artifacts", "device": "…", "state": "…",
- "limit": 50, "semantic": false}
+ "limit": 50, "semantic": false,
+ "agent": "claude-code", "project": "shop-api", "since_ms": 1780272000000, "until_ms": 1782863999999}
 → {"op": "result", "data": {"query": "关键词", "total": 1, "score_type": "keyword",
     "degraded": false, "results": [
     {"uri": "store://…", "space": "artifacts", "device": "…", "path": "…",
      "sha256": "…", "size": 35, "state": "committed", "snippet": "…", "score": -1.0}]}}
 // semantic:true → 向量召回；不可用时回退 keyword 且 degraded:true
+// agent/project/since_ms/until_ms 均为可选召回过滤（R1）：agent/project 按
+// sessions 路径约定 <agent>/<project>/<file> 派生，since/until 过滤 files.mtime。
 
 // 事件列表（seq > since；升序；可选 kind 过滤）
 {"op": "events.list", "since": 0, "limit": 50, "kind": "handoff.created"}
@@ -290,7 +293,10 @@ App 经 Noise 配对调用，与 HTTP `/api/v1/search`、`/api/v1/events*` 语�
 
 - ACL：同 `stats`（owner 允许；friend → `untrusted`）。
 - `search`：可选 `space`/`device`/`state`/`limit`（默认 50，上限 200）；
-  未知 space 名 → `bad_op`。
+  未知 space 名 → `bad_op`。可选过滤器 `agent`/`project`（路径前缀/LIKE）
+  与 `since_ms`/`until_ms`（mtime 闭区间）；混合检索的 RRF k 与 overfetch
+  倍数经环境变量 `NEXUSPOUCH_RRF_K`（默认 60）/ `NEXUSPOUCH_SEARCH_OVERFETCH`
+  （默认 3）配置。
 - `events.list`：`since` 缺省 0；无事件总线时返回空列表与 `latest_seq: 0`。
 
 ## 3. ACL 矩阵

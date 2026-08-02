@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "device": "aaaaaaaaaaaaaaaa",
+  "description": "R1 retrieval eval set (RECALL_ACCURACY_DESIGN §1.1). Corpus: 16 synthetic session transcripts (claude/codex/acp formats, zh/en mixed) under the sessions space. Queries: 36, covering semantic / exact / cross_agent / cross_project / time. Gold answers are store URIs. mtimes are fixed (June/July 2026) so time-range filters isolate known subsets. Deterministic with NEXUSPOUCH_EMBED=hash.",
+  "corpus": [
+    {
+      "path": "claude-code/shop-api/sess-001.jsonl",
+      "mtime_ms": 1781049600000,
+      "content": "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-06-10T09:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"昨天部署到测试环境一直失败,pod 起不来,这次部署报错怎么排查?\"}}\n{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-06-10T09:00:08.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"先看 kubectl describe pod,部署报错原因是 ImagePullBackOff:镜像 tag 写成了 latest,仓库里只有 v1.4.2。\"}]}}\n{\"type\":\"user\",\"uuid\":\"u2\",\"timestamp\":\"2026-06-10T09:01:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"所以部署报错最后怎么解决的?\"}}\n{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-06-10T09:01:12.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"解决办法:把部署清单里的镜像 tag 从 latest 改成 v1.4.2,重新部署后报错消失,pod 正常启动。部署报错这类问题优先查镜像 tag。\"}]}}"
+    },
+    {
+      "path": "claude-code/shop-api/sess-002.jsonl",
+      "mtime_ms": 1781222400000,
+      "content": "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-06-12T10:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"下单接口偶发 NullPointerException,堆栈指向 OrderService.calculateDiscount。\"}}\n{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-06-12T10:00:09.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"calculateDiscount 在优惠券为空时没判空。已修复,并把重试间隔改成配置项 retry_backoff_ms,默认 500 毫秒。\"}]}}\n{\"type\":\"user\",\"uuid\":\"u2\",\"timestamp\":\"2026-06-12T10:02:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"retry_backoff_ms 先调到 200 再观察一周。\"}}"
+    },
+    {
+      "path": "codex/shop-api/rollout-101.jsonl",
+      "mtime_ms": 1783036800000,
+      "content": "{\"type\":\"response_item\",\"timestamp\":\"2026-07-03T14:00:00.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"大促压测发现库存超卖,并发下库存扣成了负数。\"}]}}\n{\"type\":\"response_item\",\"timestamp\":\"2026-07-03T14:00:20.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"库存扣减存在 race condition。修复在 commit 9f3c2ab7d1e8:改用数据库原子 UPDATE ... WHERE stock > 0,超卖消失。\"}]}}\n{\"type\":\"response_item\",\"timestamp\":\"2026-07-03T14:01:00.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"把 9f3c2ab7d1e8 cherry-pick 到 release 分支上线。\"}]}}"
+    },
+    {
+      "path": "codex/pay-svc/rollout-102.jsonl",
+      "mtime_ms": 1781740800000,
+      "content": "{\"type\":\"response_item\",\"timestamp\":\"2026-06-18T11:00:00.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"支付宝的支付回调一直超时,第三方 5 秒就断开。\"}]}}\n{\"type\":\"response_item\",\"timestamp\":\"2026-06-18T11:00:15.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"支付回调超时是因为回调里同步落了多张表。处理方案:回调只做幂等登记(idempotency key 去重)后立刻返回成功,异步 worker 再记账,支付回调超时消失。\"}]}}"
+    },
+    {
+      "path": "acp-proxy/pay-svc/sess-201.jsonl",
+      "mtime_ms": 1781913600000,
+      "content": "{\"agent\":\"acp-proxy\",\"session_id\":\"sess-201\",\"seq\":1,\"ts_ms\":1781913600000,\"role\":\"user\",\"content\":\"热点商品查询把 Redis 缓存穿透了,数据库 CPU 打满。\"}\n{\"agent\":\"acp-proxy\",\"session_id\":\"sess-201\",\"seq\":2,\"ts_ms\":1781913601000,\"role\":\"assistant\",\"content\":\"缓存穿透的防法:空结果也缓存 30 秒,入口加一层,布隆过滤器(bloom filter)拦截不存在的 key,Redis 缓存压力立刻降下来。\"}\n{\"agent\":\"acp-proxy\",\"session_id\":\"sess-201\",\"seq\":3,\"ts_ms\":1781913602000,\"role\":\"user\",\"content\":\"布隆过滤器上线后缓存命中率回到 99%。\"}"
+    },
+    {
+      "path": "claude-code/web-ui/sess-003.jsonl",
+      "mtime_ms": 1783468800000,
+      "content": "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-07-08T15:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"设计评审过了,页面要做深色模式(dark theme),怎么配?\"}}\n{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-07-08T15:00:10.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"页面配色全部改用 CSS 变量:深色模式一套变量值,浅色一套,切换时只换 data-theme 属性。深色模式下注意对比度别太低。\"}]}}"
+    },
+    {
+      "path": "codex/web-ui/rollout-103.jsonl",
+      "mtime_ms": 1783641600000,
+      "content": "{\"type\":\"response_item\",\"timestamp\":\"2026-07-10T09:30:00.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"前端 React 页面无限循环渲染,一直刷新,CPU 飙高。\"}]}}\n{\"type\":\"response_item\",\"timestamp\":\"2026-07-10T09:30:18.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"useEffect 的依赖数组里放了每次渲染都新建的对象,导致无限循环。把对象用 useMemo 固定,或者从依赖数组里移除,页面循环渲染停止。\"}]}}"
+    },
+    {
+      "path": "acp-proxy/data-pipe/sess-202.jsonl",
+      "mtime_ms": 1783209600000,
+      "content": "{\"agent\":\"acp-proxy\",\"session_id\":\"sess-202\",\"seq\":1,\"ts_ms\":1783209600000,\"role\":\"user\",\"content\":\"Kafka 消费 lag 积压越来越多,消费跟不上生产。\"}\n{\"agent\":\"acp-proxy\",\"session_id\":\"sess-202\",\"seq\":2,\"ts_ms\":1783209601000,\"role\":\"assistant\",\"content\":\"排查发现消费者组 rebalance 太频繁:session timeout 太短。调大 session.timeout.ms 并增加分区后,Kafka 积压快速下降。\"}"
+    },
+    {
+      "path": "claude-code/data-pipe/sess-004.jsonl",
+      "mtime_ms": 1782345600000,
+      "content": "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-06-25T16:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"PostgreSQL 数据库迁移加列把线上表锁住了,读写全堵。\"}}\n{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-06-25T16:00:11.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"加列带默认值会重写整表。数据库迁移方案:先加空列再分批回填;大表用 pg_repack 在线重整,避免长时间锁表。\"}]}}"
+    },
+    {
+      "path": "codex/infra-k8s/rollout-104.jsonl",
+      "mtime_ms": 1783814400000,
+      "content": "{\"type\":\"response_item\",\"timestamp\":\"2026-07-12T08:00:00.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"证书自动续期失败,https 快过期了。\"}]}}\n{\"type\":\"response_item\",\"timestamp\":\"2026-07-12T08:00:16.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"cert-manager 的 ACME challenge 没通过:ingress 的 80 端口被安全组挡了。放行后证书续期成功,自动续期恢复。\"}]}}"
+    },
+    {
+      "path": "acp-proxy/infra-k8s/sess-203.jsonl",
+      "mtime_ms": 1784332800000,
+      "content": "{\"agent\":\"acp-proxy\",\"session_id\":\"sess-203\",\"seq\":1,\"ts_ms\":1784332800000,\"role\":\"user\",\"content\":\"节点磁盘满了,pod 被驱逐,怎么清理磁盘空间?\"}\n{\"agent\":\"acp-proxy\",\"session_id\":\"sess-203\",\"seq\":2,\"ts_ms\":1784332801000,\"role\":\"assistant\",\"content\":\"磁盘被 Redis 的 AOF 文件和旧容器日志占满。清理方案:log rotation 保留 7 天,Redis 开 AOF 重写,PVC 顺便扩容 20G。\"}"
+    },
+    {
+      "path": "claude-code/ml-train/sess-005.jsonl",
+      "mtime_ms": 1782604800000,
+      "content": "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-06-28T20:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"训练到一半 loss 突然变成 NaN,怎么办?\"}}\n{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-06-28T20:00:12.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"loss 变 NaN 多是学习率太大导致梯度爆炸。把 learning rate 调小 10 倍,并加上 gradient clipping(梯度裁剪),训练恢复收敛。\"}]}}"
+    },
+    {
+      "path": "codex/ml-train/rollout-105.jsonl",
+      "mtime_ms": 1784073600000,
+      "content": "{\"type\":\"response_item\",\"timestamp\":\"2026-07-15T21:00:00.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"一训练就 CUDA out of memory,显存 OOM 直接爆了。\"}]}}\n{\"type\":\"response_item\",\"timestamp\":\"2026-07-15T21:00:14.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"显存不够:batch size 从 64 调到 16,开 gradient accumulation 等效大批量,训练显存占用降一半。\"}]}}"
+    },
+    {
+      "path": "acp-proxy/shop-api/sess-204.jsonl",
+      "mtime_ms": 1782086400000,
+      "content": "{\"agent\":\"acp-proxy\",\"session_id\":\"sess-204\",\"seq\":1,\"ts_ms\":1782086400000,\"role\":\"user\",\"content\":\"大促期间接口被限流,一直返回 429。\"}\n{\"agent\":\"acp-proxy\",\"session_id\":\"sess-204\",\"seq\":2,\"ts_ms\":1782086401000,\"role\":\"assistant\",\"content\":\"限流用的是令牌桶 token bucket,桶容量太小。把接口限流阈值调大并对突发放行短窗口,429 明显减少。\"}"
+    },
+    {
+      "path": "claude-code/pay-svc/sess-006.jsonl",
+      "mtime_ms": 1784505600000,
+      "content": "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-07-20T10:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"对账的时候金额总差几分钱,对不上。\"}}\n{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-07-20T10:00:09.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"对账差异来自金额四舍五入:一方按元保留两位,一方按分。统一用分存储、对账时再换算,几分钱的差异消失。\"}]}}"
+    },
+    {
+      "path": "codex/data-pipe/rollout-106.jsonl",
+      "mtime_ms": 1782777600000,
+      "content": "{\"type\":\"response_item\",\"timestamp\":\"2026-06-30T13:00:00.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"schema 升级后老消费者挂了一批,Kafka 消费直接退出。\"}]}}\n{\"type\":\"response_item\",\"timestamp\":\"2026-06-30T13:00:15.000Z\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"schema registry 兼容性设成了 FULL,新 Avro 字段没给默认值导致反序列化失败。兼容级别改回 BACKWARD、新字段加默认值后消费者恢复。\"}]}}"
+    }
+  ],
+  "queries": [
+    {"q": "上次部署报错怎么解决的", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/shop-api/sess-001.jsonl"], "type": "semantic", "note": "语义问题:口语化中文,FTS 无逐字匹配,靠向量侧"},
+    {"q": "支付回调老是超时怎么处理", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/pay-svc/rollout-102.jsonl"], "type": "semantic", "note": "语义问题:中文口语"},
+    {"q": "缓存被穿透了怎么防", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/pay-svc/sess-201.jsonl"], "type": "semantic", "note": "语义问题:中文口语"},
+    {"q": "训练时 loss 变成 NaN 怎么办", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/ml-train/sess-005.jsonl"], "type": "semantic", "note": "语义问题:中英混合"},
+    {"q": "Kafka 消费积压越来越多怎么排查", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/data-pipe/sess-202.jsonl"], "type": "semantic", "note": "语义问题:中英混合"},
+    {"q": "数据库迁移加列把表锁住了", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/data-pipe/sess-004.jsonl"], "type": "semantic", "note": "语义问题"},
+    {"q": "证书自动续期失败怎么修", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/infra-k8s/rollout-104.jsonl"], "type": "semantic", "note": "语义问题"},
+    {"q": "磁盘空间满了怎么清理", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/infra-k8s/sess-203.jsonl"], "type": "semantic", "note": "语义问题"},
+    {"q": "接口被限流了一直 429", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/shop-api/sess-204.jsonl"], "type": "semantic", "note": "语义问题"},
+    {"q": "对账的时候金额差几分钱", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/pay-svc/sess-006.jsonl"], "type": "semantic", "note": "语义问题"},
+    {"q": "训练时显存爆了", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/ml-train/rollout-105.jsonl"], "type": "semantic", "note": "语义问题:与 sess-005 共享『训练』,区分显存主题"},
+    {"q": "页面想要深色模式怎么配", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/web-ui/sess-003.jsonl"], "type": "semantic", "note": "语义问题"},
+    {"q": "前端页面死循环一直刷新", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/web-ui/rollout-103.jsonl"], "type": "semantic", "note": "语义问题:『死循环』对应正文『无限循环』"},
+    {"q": "Avro schema 升级后老消费者挂了", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/data-pipe/rollout-106.jsonl"], "type": "semantic", "note": "语义问题:与 sess-202 共享『消费者』,区分 schema 主题"},
+    {"q": "ImagePullBackOff", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/shop-api/sess-001.jsonl"], "type": "exact", "note": "精确术语:报错串"},
+    {"q": "retry_backoff_ms", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/shop-api/sess-002.jsonl"], "type": "exact", "note": "精确术语:配置变量名"},
+    {"q": "9f3c2ab7d1e8", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/shop-api/rollout-101.jsonl"], "type": "exact", "note": "精确术语:commit hash"},
+    {"q": "calculateDiscount", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/shop-api/sess-002.jsonl"], "type": "exact", "note": "精确术语:函数名"},
+    {"q": "useEffect", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/web-ui/rollout-103.jsonl"], "type": "exact", "note": "精确术语:API 名"},
+    {"q": "pg_repack", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/data-pipe/sess-004.jsonl"], "type": "exact", "note": "精确术语:工具名"},
+    {"q": "gradient clipping", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/ml-train/sess-005.jsonl"], "type": "exact", "note": "精确术语:英文词组"},
+    {"q": "token bucket", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/shop-api/sess-204.jsonl"], "type": "exact", "note": "精确术语:英文词组"},
+    {"q": "ACME challenge", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/infra-k8s/rollout-104.jsonl"], "type": "exact", "note": "精确术语:英文词组"},
+    {"q": "schema registry", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/data-pipe/rollout-106.jsonl"], "type": "exact", "note": "精确术语:英文词组"},
+    {"q": "布隆过滤器", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/pay-svc/sess-201.jsonl"], "type": "exact", "note": "精确术语:中文术语(正文标点边界成独立 token)"},
+    {"q": "idempotency", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/pay-svc/rollout-102.jsonl"], "type": "exact", "note": "精确术语:英文单词"},
+    {"q": "库存超卖", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/shop-api/rollout-101.jsonl"], "type": "cross_agent", "note": "跨 agent:只看 codex 会话", "filter": {"agent": "codex"}},
+    {"q": "限流", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/shop-api/sess-204.jsonl"], "type": "cross_agent", "note": "跨 agent:只看 acp-proxy 会话", "filter": {"agent": "acp-proxy"}},
+    {"q": "对账", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/pay-svc/sess-006.jsonl"], "type": "cross_agent", "note": "跨 agent:只看 claude-code 会话", "filter": {"agent": "claude-code"}},
+    {"q": "支付", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/pay-svc/rollout-102.jsonl"], "type": "cross_project", "note": "跨项目:只看 pay-svc", "filter": {"project": "pay-svc"}},
+    {"q": "Kafka", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/data-pipe/sess-202.jsonl"], "type": "cross_project", "note": "跨项目:只看 data-pipe", "filter": {"project": "data-pipe"}},
+    {"q": "OOM", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/ml-train/rollout-105.jsonl"], "type": "cross_project", "note": "跨项目:只看 ml-train", "filter": {"project": "ml-train"}},
+    {"q": "Redis", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/pay-svc/sess-201.jsonl"], "type": "time", "note": "时间相关:6 月窗口只剩缓存穿透那场", "filter": {"since_ms": 1780272000000, "until_ms": 1782863999999}},
+    {"q": "Redis", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/infra-k8s/sess-203.jsonl"], "type": "time", "note": "时间相关:7 月起只剩 AOF 磁盘那场", "filter": {"since_ms": 1782864000000}},
+    {"q": "报错", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/shop-api/sess-001.jsonl"], "type": "time", "note": "时间相关:截至 6 月底", "filter": {"until_ms": 1782863999999}},
+    {"q": "训练", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/ml-train/rollout-105.jsonl"], "type": "time", "note": "时间相关:7 月起,sess-005(6 月)被过滤", "filter": {"since_ms": 1782864000000}}
+  ]
+}

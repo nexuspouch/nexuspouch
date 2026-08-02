@@ -121,9 +121,10 @@ impl Client {
         state: Option<&str>,
         limit: usize,
     ) -> Result<Value, String> {
-        self.search_ex(q, space, device, state, limit, false)
+        self.search_ex(q, space, device, state, limit, false, None)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn search_ex(
         &self,
         q: &str,
@@ -132,6 +133,7 @@ impl Client {
         state: Option<&str>,
         limit: usize,
         semantic: bool,
+        filter: Option<&crate::store::SearchFilter>,
     ) -> Result<Value, String> {
         let mut url = format!("{}/api/v1/search?q={}", self.base, urlencoding(q));
         if let Some(s) = space {
@@ -146,6 +148,20 @@ impl Client {
         url.push_str(&format!("&limit={}", limit.max(1)));
         if semantic {
             url.push_str("&semantic=true");
+        }
+        if let Some(f) = filter {
+            if let Some(a) = f.agent.as_deref() {
+                url.push_str(&format!("&agent={}", urlencoding(a)));
+            }
+            if let Some(p) = f.project.as_deref() {
+                url.push_str(&format!("&project={}", urlencoding(p)));
+            }
+            if let Some(s) = f.since_ms {
+                url.push_str(&format!("&since_ms={s}"));
+            }
+            if let Some(u) = f.until_ms {
+                url.push_str(&format!("&until_ms={u}"));
+            }
         }
         self.get_json(&url)
     }

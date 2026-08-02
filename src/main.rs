@@ -89,6 +89,39 @@ enum Command {
     IndexRebuild,
     /// Sync all configured directory bindings once and print reports
     BindingsSync,
+    /// Recall accuracy tooling (R1): retrieval eval set + metrics
+    Recall {
+        #[command(subcommand)]
+        action: RecallAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum RecallAction {
+    /// Run the retrieval eval fixture and print Recall@K / MRR / nDCG.
+    ///
+    /// Exit code is non-zero on severe regression: more than half of the
+    /// queries hit nothing, or Recall@K falls below --min-recall.
+    Eval {
+        /// Fixture path (default: docs/storage_fixtures/recall_eval.json)
+        #[arg(long)]
+        fixture: Option<PathBuf>,
+        /// Max K for Recall@K / nDCG@K (also the search limit)
+        #[arg(long, default_value = "10")]
+        k: usize,
+        /// Hybrid semantic+keyword search (default)
+        #[arg(long, conflicts_with = "keyword")]
+        semantic: bool,
+        /// Keyword-only FTS5 search (comparison baseline)
+        #[arg(long)]
+        keyword: bool,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+        /// Fail (exit 1) when Recall@K drops below this gate
+        #[arg(long)]
+        min_recall: Option<f64>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -211,6 +244,40 @@ fn cmd_bindings_sync(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn cmd_recall_eval(
+    fixture: Option<PathBuf>,
+    k: usize,
+    keyword: bool,
+    json_out: bool,
+    min_recall: Option<f64>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use nexuspouch::store::recall_eval as re;
+    // Hermetic default: the deterministic hash embedder unless the operator
+    // explicitly chose one (NEXUSPOUCH_EMBED / NEXUSPOUCH_EMBED_URL), so eval
+    // runs never trigger an ONNX model download.
+    if std::env::var_os("NEXUSPOUCH_EMBED").is_none()
+        && std::env::var_os("NEXUSPOUCH_EMBED_URL").is_none()
+    {
+        std::env::set_var("NEXUSPOUCH_EMBED", "hash");
+    }
+    let path = fixture.unwrap_or_else(re::default_fixture_path);
+    let report = re::run_eval(&path, k, !keyword)?;
+    if json_out {
+        println!("{}", serde_json::to_string_pretty(&report.to_json())?);
+    } else {
+        print!("{}", re::render_table(&report));
+    }
+    let gate = min_recall.unwrap_or(0.0);
+    if report.is_degraded(gate) {
+        eprintln!(
+            "recall eval: degraded (zero-hit={}/{}, recall@{}={:.3}, gate={:.3})",
+            report.zero_hit_queries, report.total_queries, report.k, report.recall_at_k, gate
+        );
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 fn parse_bind(spec: &str) -> Result<(String, String, String, String), String> {
     let (external, rest) = spec
         .split_once('=')
@@ -250,6 +317,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::McpAgent { agent }) => return cmd_mcp(&args, Some(agent.clone())).await,
         Some(Command::IndexRebuild) => return cmd_index_rebuild(&args),
         Some(Command::BindingsSync) => return cmd_bindings_sync(&args),
+        Some(Command::Recall {
+            action:
+                RecallAction::Eval {
+                    fixture,
+                    k,
+                    semantic: _,
+                    keyword,
+                    json,
+                    min_recall,
+                },
+        }) => {
+            return cmd_recall_eval(fixture.clone(), *k, *keyword, *json, *min_recall);
+        }
         None => {}
     }
 

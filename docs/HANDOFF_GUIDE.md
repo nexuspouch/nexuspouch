@@ -37,8 +37,8 @@
 | F 运维/QA（真机、vitest Node24） | QA_BASELINE.md + DEVICE_TESTING.md；vitest 在 agent-bridge 仓库 | 真机需硬件 |
 | G 快照管理薄层 | **未成文，先补设计**（建议并入 SPACE_BOUNDARY_DESIGN 或独立文档） | 只有讨论记录 |
 | H 向量搜索 P1-P3 | VECTOR_SEARCH_DESIGN.md（已定稿） | 按里程碑推进 |
-| I 会话历史管理（P1-P3 已落地） | SESSION_HISTORY_DESIGN.md + BACKLOG I | 剩余：**P1.5 Web 会话管理 UI**（主打卖点） |
-| J 召回准确性 R1-R3 | RECALL_ACCURACY_DESIGN.md（已定稿） | 依赖 I/H 混合检索基线（已就位） |
+| I 会话历史管理（P1–P3 + P1.5 Web UI） | SESSION_HISTORY_DESIGN.md + BACKLOG I | 深链 hub↔节点后置 |
+| J 召回准确性（R1 已落地；R2/R3 待） | RECALL_ACCURACY_DESIGN.md | R1 已合入 `codex/backlog-auto`；P1.5 搜索已接 SearchFilter |
 
 ## 3. 工作规则（红线）
 

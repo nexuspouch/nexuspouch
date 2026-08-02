@@ -1,6 +1,14 @@
 # 召回准确性设计（Recall Accuracy）
 
-> 状态：设计稿 v0.1（2026-08-02）
+> 状态：设计稿 v0.1（2026-08-02）；**R1 已落地**（2026-08-02）：评估集
+> `docs/storage_fixtures/recall_eval.json`（16 合成会话 / 36 查询，覆盖
+> 语义/精确术语/跨 agent/跨项目/时间五类），`nexuspouch recall eval`
+> （Recall@1/5/K + MRR + nDCG@K，按类型分组，--json 机器可读，严重退化
+> 退出码非零），召回参数化（`SearchFilter`: agent/project/since_ms/until_ms
+> 透出 HTTP /api/v1/search、store 帧 search、MCP store_search/session_recall；
+> `NEXUSPOUCH_RRF_K` / `NEXUSPOUCH_SEARCH_OVERFETCH` 环境变量）。评估默认
+> hermetic（hash embedder）。基线：hybrid k=10 全指标 1.000；keyword 对照
+> R@10=0.444（semantic 类 0，exact 类 1.0）。
 > 定位：保证 `session_recall` / `store_search` 语义召回的准确性——这是
 > "统一会话管理"卖点的生死线。核心观点：**先立评估闭环，再谈优化**。
 
@@ -39,7 +47,7 @@
 | 手段 | 解决什么 | 状态 |
 |------|---------|------|
 | 混合检索（FTS5 + 向量 RRF） | 语义 vs 精确术语互补 | ✅ 已落地（hybrid） |
-| 元数据过滤（agent/project/date/space） | 缩小候选空间 | 待实现（R1 参数化） |
+| 元数据过滤（agent/project/date/space） | 缩小候选空间 | ✅ 已落地（R1 `SearchFilter`，透出 HTTP/帧/MCP） |
 | 两阶段召回：粗召回 top-50 → rerank top-10 | 精排提升准确率最有效 | 待实现（R2） |
 | query 理解/改写（口语化、中英混合、拼写容错） | 用户 query 不精确 | 待评估（R2 后） |
 | embedding 模型升级 | 语义更强但资源涨 | 本地优先约束下收益有限 |
@@ -72,7 +80,7 @@
 
 | 阶段 | 内容 | 预估 |
 |------|------|------|
-| R1 | 评估集 + `recall eval` + Recall@K/MRR/nDCG + 召回参数化（top_k/filter/权重） | 1 周 |
+| R1 | 评估集 + `recall eval` + Recall@K/MRR/nDCG + 召回参数化（top_k/filter/权重） | ✅ 已落地（2026-08-02） |
 | R2 | 两阶段召回（粗召回 + 规则/小模型 rerank）+ 时间衰减 + 去重聚合 + 片段返回 | 1 周 |
 | R3 | 反馈闭环（点击/采纳/纠错事件）+ 定期回归 + 可选 A/B | 1 周 |
 
@@ -80,8 +88,11 @@
 
 - 混合检索基线已就位（H 向量搜索 P1 + I 会话 P2 `session_recall`）；
 - R1 评估集放共享 fixture，双端与 CI 可回归；
-- 参数化查询经 `session_recall` / `store_search` 透出（top_k、filter、权重）；
-- 反馈事件走现有 EventBus / 审计链路。
+- 参数化查询经 `session_recall` / `store_search` / HTTP `/api/v1/search` 透出
+  （agent/project/since_ms/until_ms；`NEXUSPOUCH_RRF_K` / `NEXUSPOUCH_SEARCH_OVERFETCH`）；
+- **P1.5 整合**：`/admin/sessions` 搜索屏与 `/admin/api/sessions/search` 透出同一
+  `SearchFilter`（agent / project / 日期范围 + semantic hybrid）；
+- 反馈事件走现有 EventBus / 审计链路（R3）。
 
 ## 6. 风险与对策
 

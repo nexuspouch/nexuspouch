@@ -478,6 +478,10 @@ struct SessionsSearchQuery {
     limit: Option<usize>,
     #[serde(default)]
     semantic: bool,
+    agent: Option<String>,
+    project: Option<String>,
+    since_ms: Option<i64>,
+    until_ms: Option<i64>,
 }
 
 async fn sessions_search(
@@ -486,12 +490,20 @@ async fn sessions_search(
     Query(q): Query<SessionsSearchQuery>,
 ) -> Response {
     auth_json_blocking(state, headers, move |s| {
+        let filter = crate::store::SearchFilter {
+            agent: q.agent.filter(|s| !s.is_empty()),
+            project: q.project.filter(|s| !s.is_empty()),
+            since_ms: q.since_ms,
+            until_ms: q.until_ms,
+        };
+        let filter = (!filter.is_empty()).then_some(filter);
         sessions::search(
             &s.store,
             &q.q,
             q.device.as_deref(),
             q.limit.unwrap_or(0),
             q.semantic,
+            filter.as_ref(),
         )
     })
     .await

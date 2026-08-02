@@ -11,6 +11,7 @@ pub mod maintenance;
 pub mod manifest;
 pub mod master;
 pub mod migrate_seed;
+pub mod recall_eval;
 pub mod reprotect;
 pub mod retention;
 pub mod sanitize;
@@ -51,6 +52,100 @@ pub trait PeerEnsure: Send + Sync {
 }
 
 pub const MAX_CHUNK: usize = 65536;
+
+/// Optional recall filters (R1 parameterization, RECALL_ACCURACY_DESIGN §5).
+///
+/// agent/project derive from the sessions path convention
+/// `<agent>/<project>/<file>`; since_ms/until_ms compare against
+/// `files.mtime` (epoch millis). All fields optional; empty = no filtering.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchFilter {
+    pub agent: Option<String>,
+    pub project: Option<String>,
+    pub since_ms: Option<i64>,
+    pub until_ms: Option<i64>,
+}
+
+impl SearchFilter {
+    pub fn is_empty(&self) -> bool {
+        self.agent.is_none()
+            && self.project.is_none()
+            && self.since_ms.is_none()
+            && self.until_ms.is_none()
+    }
+
+    /// Path rule shared by FTS SQL (LIKE) and vector URI matching:
+    /// agent = first path segment; project = any middle segment
+    /// (`<agent>/<project>/<file>` in practice).
+    pub fn path_match(&self, path: &str) -> bool {
+        if let Some(a) = self.agent.as_deref().filter(|s| !s.is_empty()) {
+            if !path.starts_with(&format!("{a}/")) {
+                return false;
+            }
+        }
+        if let Some(p) = self.project.as_deref().filter(|s| !s.is_empty()) {
+            if !path.contains(&format!("/{p}/")) {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn time_match(&self, mtime_ms: i64) -> bool {
+        if let Some(s) = self.since_ms {
+            if mtime_ms < s {
+                return false;
+            }
+        }
+        if let Some(u) = self.until_ms {
+            if mtime_ms > u {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn needs_time(&self) -> bool {
+        self.since_ms.is_some() || self.until_ms.is_some()
+    }
+
+    /// Build from a store-frame payload; None when no filter fields are set.
+    pub fn from_payload(p: &Map<String, Value>) -> Option<SearchFilter> {
+        let f = SearchFilter {
+            agent: p
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .filter(|s| !s.is_empty()),
+            project: p
+                .get("project")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .filter(|s| !s.is_empty()),
+            since_ms: payload_int64(p, "since_ms"),
+            until_ms: payload_int64(p, "until_ms"),
+        };
+        (!f.is_empty()).then_some(f)
+    }
+}
+
+/// RRF fusion constant (default 60; override NEXUSPOUCH_RRF_K).
+pub fn rrf_k_from_env() -> f32 {
+    std::env::var("NEXUSPOUCH_RRF_K")
+        .ok()
+        .and_then(|s| s.trim().parse::<f32>().ok())
+        .filter(|k| *k > 0.0)
+        .unwrap_or(rrf::DEFAULT_K)
+}
+
+/// Hybrid overfetch multiplier (default 3; override NEXUSPOUCH_SEARCH_OVERFETCH).
+pub fn overfetch_mult_from_env() -> usize {
+    std::env::var("NEXUSPOUCH_SEARCH_OVERFETCH")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|m| *m >= 1)
+        .unwrap_or(3)
+}
 
 #[derive(Debug, Clone)]
 pub struct OpError {
@@ -422,9 +517,10 @@ impl Local {
         device: Option<&str>,
         state: Option<&str>,
         limit: usize,
+        filter: Option<&SearchFilter>,
     ) -> Result<Vec<serde_json::Value>, OpError> {
         self.index
-            .search(q, space, device, state, limit)
+            .search(q, space, device, state, limit, filter)
             .map_err(|e| OpError::new("internal", e))
     }
 
@@ -433,6 +529,11 @@ impl Local {
     /// When `semantic` is true: FTS5 + vector RRF hybrid (`score_type: hybrid`).
     /// Vector unavailable → FTS5 with `degraded: true`. Only one side hits →
     /// that side's `score_type` (`keyword` / `vector`).
+    ///
+    /// `filter` narrows candidates by agent/project (path-derived) and mtime
+    /// range; RRF k and the overfetch multiplier come from
+    /// NEXUSPOUCH_RRF_K / NEXUSPOUCH_SEARCH_OVERFETCH (defaults 60 / 3).
+    #[allow(clippy::too_many_arguments)]
     pub fn search_query(
         &self,
         q: &str,
@@ -441,10 +542,11 @@ impl Local {
         state: Option<&str>,
         limit: usize,
         semantic: bool,
+        filter: Option<&SearchFilter>,
     ) -> Result<Map<String, Value>, OpError> {
         let limit = limit.clamp(1, 200);
         if !semantic {
-            let results = self.search_index(q, space, device, state, limit)?;
+            let results = self.search_index(q, space, device, state, limit, filter)?;
             return Ok(Map::from_iter([
                 ("query".into(), json!(q)),
                 ("total".into(), json!(results.len())),
@@ -454,10 +556,12 @@ impl Local {
             ]));
         }
 
-        let overfetch = (limit * 3).clamp(limit, 200);
-        let keyword = self.search_index(q, space, device, state, overfetch)?;
+        let overfetch = (limit * overfetch_mult_from_env()).clamp(limit, 200);
+        let keyword = self.search_index(q, space, device, state, overfetch, filter)?;
         let vector_res = if self.vector.available() {
-            self.vector.search(q, space, device, overfetch)
+            self.vector
+                .search(q, space, device, overfetch, filter)
+                .map(|hits| self.apply_time_filter(hits, filter))
         } else {
             Err("vector_unavailable".into())
         };
@@ -513,7 +617,7 @@ impl Local {
                     .iter()
                     .filter_map(|h| h.get("uri").and_then(|v| v.as_str()).map(|s| s.to_string()))
                     .collect();
-                let fused = rrf::fuse(&[&kw_uris, &vec_uris], rrf::DEFAULT_K);
+                let fused = rrf::fuse(&[&kw_uris, &vec_uris], rrf_k_from_env());
                 let kw_by_uri: HashMap<&str, &Value> = keyword
                     .iter()
                     .filter_map(|h| h.get("uri").and_then(|v| v.as_str()).map(|u| (u, h)))
@@ -557,6 +661,35 @@ impl Local {
         }
     }
 
+    /// Vector hits carry no mtime; post-filter by files.mtime when the query
+    /// sets a time range (FTS side is filtered in SQL).
+    fn apply_time_filter(
+        &self,
+        hits: Vec<serde_json::Value>,
+        filter: Option<&SearchFilter>,
+    ) -> Vec<serde_json::Value> {
+        let Some(f) = filter else {
+            return hits;
+        };
+        if !f.needs_time() {
+            return hits;
+        }
+        let uris: Vec<String> = hits
+            .iter()
+            .filter_map(|h| h.get("uri").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        let mtimes = self.index.mtimes_for(&uris);
+        hits.into_iter()
+            .filter(|h| {
+                h.get("uri")
+                    .and_then(|v| v.as_str())
+                    .and_then(|u| mtimes.get(u))
+                    .map(|m| f.time_match(*m))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
     fn op_search(&self, frame: &Frame) -> Result<Map<String, Value>, OpError> {
         let q = frame
             .payload
@@ -588,7 +721,8 @@ impl Local {
             .get("semantic")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        self.search_query(q, space, device, state, limit, semantic)
+        let filter = SearchFilter::from_payload(&frame.payload);
+        self.search_query(q, space, device, state, limit, semantic, filter.as_ref())
     }
 
     fn op_events_list(&self, frame: &Frame) -> Result<Map<String, Value>, OpError> {
@@ -1116,7 +1250,7 @@ mod tests {
 
         // FTS uses phrase MATCH — keep q as a token present in the body.
         let out = store
-            .search_query("zebra99", Some("artifacts"), None, None, 10, true)
+            .search_query("zebra99", Some("artifacts"), None, None, 10, true, None)
             .unwrap();
         assert_eq!(out["score_type"], "hybrid");
         assert_eq!(out["degraded"], false);
@@ -1125,5 +1259,92 @@ mod tests {
         assert_eq!(results[0]["score_type"], "hybrid");
         assert!(results[0].get("rank_keyword").is_some());
         assert!(results[0].get("rank_vector").is_some());
+    }
+
+    #[test]
+    fn search_query_filter_and_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let device = "aaaaaaaaaaaaaaaa";
+        let store = Local::open(dir.path(), device).unwrap();
+        let mk = |path: &str, mtime: i64| index::IndexEntry {
+            uri: format!("store://sessions/{device}/{path}"),
+            space: "sessions".into(),
+            device: device.into(),
+            path: path.into(),
+            sha256: "d".repeat(64),
+            size: 10,
+            mtime,
+            task: "".into(),
+            state: "committed".into(),
+            summary: None,
+            body: "zebra88 rollback runbook".into(),
+        };
+        store.index_file(&mk("claude-code/proj-a/s1.jsonl", 1000));
+        store.index_file(&mk("codex/proj-a/s2.jsonl", 2000));
+
+        // agent filter via store frame (both keyword and hybrid paths).
+        let mut q = Map::new();
+        q.insert("q".into(), json!("zebra88"));
+        q.insert("space".into(), json!("sessions"));
+        q.insert("agent".into(), json!("codex"));
+        let out = store
+            .handle(
+                Frame::from_parts("search", q.clone()),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap();
+        assert_eq!(out["total"], 1);
+        assert_eq!(out["results"][0]["path"], "codex/proj-a/s2.jsonl");
+
+        q.insert("semantic".into(), json!(true));
+        let out = store
+            .handle(
+                Frame::from_parts("search", q),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap();
+        assert_eq!(out["total"], 1);
+        assert_eq!(out["results"][0]["path"], "codex/proj-a/s2.jsonl");
+
+        // time range via search_query directly (vector side included).
+        let filter = SearchFilter {
+            since_ms: Some(1500),
+            ..Default::default()
+        };
+        let out = store
+            .search_query(
+                "zebra88",
+                Some("sessions"),
+                None,
+                None,
+                10,
+                true,
+                Some(&filter),
+            )
+            .unwrap();
+        assert_eq!(out["total"], 1);
+        assert_eq!(out["results"][0]["path"], "codex/proj-a/s2.jsonl");
+
+        // out-of-range mtime filters everything (vector hits dropped via mtime lookup).
+        let filter = SearchFilter {
+            until_ms: Some(500),
+            ..Default::default()
+        };
+        let out = store
+            .search_query(
+                "zebra88",
+                Some("sessions"),
+                None,
+                None,
+                10,
+                true,
+                Some(&filter),
+            )
+            .unwrap();
+        assert_eq!(out["total"], 0);
     }
 }

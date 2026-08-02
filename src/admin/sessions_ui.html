@@ -339,6 +339,28 @@ async function showSearch(params) {
   q.placeholder = '关键词或语义描述，如「上次部署报错怎么解决」';
   q.style.minWidth = '18rem';
   q.value = params.get('q') || '';
+  const agentIn = el('input');
+  agentIn.placeholder = 'agent（可选）';
+  agentIn.style.width = '8rem';
+  agentIn.value = params.get('agent') || '';
+  const projectIn = el('input');
+  projectIn.placeholder = 'project（可选）';
+  projectIn.style.width = '8rem';
+  projectIn.value = params.get('project') || '';
+  const sinceIn = el('input');
+  sinceIn.type = 'date';
+  sinceIn.title = 'since（可选）';
+  if (params.get('since_ms')) {
+    const d = new Date(Number(params.get('since_ms')));
+    if (!Number.isNaN(d.getTime())) sinceIn.value = d.toISOString().slice(0, 10);
+  }
+  const untilIn = el('input');
+  untilIn.type = 'date';
+  untilIn.title = 'until（可选）';
+  if (params.get('until_ms')) {
+    const d = new Date(Number(params.get('until_ms')));
+    if (!Number.isNaN(d.getTime())) untilIn.value = d.toISOString().slice(0, 10);
+  }
   const devSel = el('select');
   const semLabel = el('label', 'row');
   const sem = el('input');
@@ -349,6 +371,10 @@ async function showSearch(params) {
   const go = el('button', null, '搜索');
   go.type = 'submit';
   form.appendChild(q);
+  form.appendChild(agentIn);
+  form.appendChild(projectIn);
+  form.appendChild(sinceIn);
+  form.appendChild(untilIn);
   form.appendChild(devSel);
   form.appendChild(semLabel);
   form.appendChild(go);
@@ -373,6 +399,10 @@ async function showSearch(params) {
     ev.preventDefault();
     const p = new URLSearchParams();
     if (q.value.trim()) p.set('q', q.value.trim());
+    if (agentIn.value.trim()) p.set('agent', agentIn.value.trim());
+    if (projectIn.value.trim()) p.set('project', projectIn.value.trim());
+    if (sinceIn.value) p.set('since_ms', String(Date.parse(sinceIn.value + 'T00:00:00Z')));
+    if (untilIn.value) p.set('until_ms', String(Date.parse(untilIn.value + 'T23:59:59Z')));
     if (sem.checked) p.set('semantic', 'true');
     if (devSel.value) p.set('device', devSel.value);
     location.hash = '#/search?' + p.toString();
@@ -380,13 +410,17 @@ async function showSearch(params) {
   const query = (params.get('q') || '').trim();
   if (!query) {
     results.appendChild(el('p', 'muted',
-      '输入查询开始。勾选「语义回忆」走 FTS5+向量混合排序；向量不可用时会自动回退关键词。'));
+      '输入查询开始。可按 agent / project / 日期过滤；勾选「语义回忆」走 FTS5+向量混合排序。'));
     return;
   }
   try {
     const p = new URLSearchParams({q: query});
     if (params.get('semantic') === 'true') p.set('semantic', 'true');
     if (params.get('device')) p.set('device', params.get('device'));
+    if (params.get('agent')) p.set('agent', params.get('agent'));
+    if (params.get('project')) p.set('project', params.get('project'));
+    if (params.get('since_ms')) p.set('since_ms', params.get('since_ms'));
+    if (params.get('until_ms')) p.set('until_ms', params.get('until_ms'));
     const out = await api('/admin/api/sessions/search?' + p.toString());
     results.innerHTML = '';
     const meta = el('p', 'muted',

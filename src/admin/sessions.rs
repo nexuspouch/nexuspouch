@@ -237,13 +237,15 @@ pub fn detail(local: &Local, uri: &str) -> Result<Map<String, Value>, OpError> {
 }
 
 /// Sessions-scoped proxy over `Local::search_query` (FTS5 keyword by default,
-/// FTS5+vector RRF hybrid when `semantic`).
+/// FTS5+vector RRF hybrid when `semantic`). Optional R1 filters narrow by
+/// agent / project / mtime range.
 pub fn search(
     local: &Local,
     q: &str,
     device: Option<&str>,
     limit: usize,
     semantic: bool,
+    filter: Option<&crate::store::SearchFilter>,
 ) -> Result<Map<String, Value>, OpError> {
     let q = q.trim();
     if q.is_empty() {
@@ -255,7 +257,15 @@ pub fn search(
         }
     }
     let limit = if limit == 0 { 50 } else { limit.clamp(1, 200) };
-    local.search_query(q, Some(spaces::SESSIONS_SPACE), device, None, limit, semantic)
+    local.search_query(
+        q,
+        Some(spaces::SESSIONS_SPACE),
+        device,
+        None,
+        limit,
+        semantic,
+        filter,
+    )
 }
 
 /// Devices with a `sessions/` directory; self (when present) sorts first.
@@ -608,11 +618,11 @@ mod tests {
         write_session(&local, "claude-code/s-1.jsonl", &fixture("session_claude.jsonl"));
         local.rebuild_index().unwrap();
         // Validation.
-        assert!(search(&local, "", None, 0, false).is_err());
-        assert!(search(&local, "   ", None, 0, false).is_err());
-        assert!(search(&local, "q", Some("nope"), 0, false).is_err());
+        assert!(search(&local, "", None, 0, false, None).is_err());
+        assert!(search(&local, "   ", None, 0, false, None).is_err());
+        assert!(search(&local, "q", Some("nope"), 0, false, None).is_err());
         // Content hit through the real index pipeline (fixture mentions deploy).
-        let out = search(&local, "deploy", None, 0, false).unwrap();
+        let out = search(&local, "deploy", None, 0, false, None).unwrap();
         assert!(out["total"].as_u64().unwrap() >= 1);
         let uris: Vec<&str> = out["results"]
             .as_array()
@@ -623,8 +633,21 @@ mod tests {
         assert!(uris.iter().any(|u| u.contains("claude-code/s-1.jsonl")));
         assert_eq!(out["score_type"], "keyword");
         // Semantic path returns structured fields even without a model.
-        let sem = search(&local, "deploy", None, 0, true).unwrap();
+        let sem = search(&local, "deploy", None, 0, true, None).unwrap();
         assert!(sem.get("score_type").is_some());
         assert!(sem.get("degraded").is_some());
+        // R1 agent filter: only matching path prefix.
+        let agent = crate::store::SearchFilter {
+            agent: Some("claude-code".into()),
+            ..Default::default()
+        };
+        let filtered = search(&local, "deploy", None, 0, false, Some(&agent)).unwrap();
+        assert!(filtered["total"].as_u64().unwrap() >= 1);
+        let miss = crate::store::SearchFilter {
+            agent: Some("codex".into()),
+            ..Default::default()
+        };
+        let empty = search(&local, "deploy", None, 0, false, Some(&miss)).unwrap();
+        assert_eq!(empty["total"], 0);
     }
 }
