@@ -604,13 +604,14 @@ mod tests {
         let old = "bbbbbbbbbbbbbbbb";
         let other = "cccccccccccccccc";
         let store = Local::open(root.path(), self_id).unwrap();
+        // Default pointer is self@epoch=1; adopt old master with a higher epoch.
         store
             .handle(
                 Frame::from_parts(
                     "master.pointer",
                     Map::from_iter([
                         ("master".into(), json!(old)),
-                        ("epoch".into(), json!(1)),
+                        ("epoch".into(), json!(2)),
                     ]),
                 ),
                 self_id,

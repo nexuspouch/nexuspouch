@@ -34,7 +34,9 @@ fn syntactically_valid_space(s: &str) -> bool {
 }
 
 pub fn parse(s: &str) -> Result<StoreUri, OpError> {
-    parse_with(s, &|sp| SPACES.contains(&sp))
+    // Parse layer accepts any syntactically valid space name; undeclared
+    // custom spaces are rejected later by the space registry / ACL.
+    parse_with(s, &|sp| syntactically_valid_space(sp))
 }
 
 /// Parse a store URI accepting spaces for which `known(space)` is true

@@ -268,6 +268,28 @@ store://<space>/<device>/<relpath>[@<ref>]
 - `unsynced_*` / 游标水位：本机同步引擎挂载时附加。
 - `volume_*`：store 根所在卷探测成功时附加；`volume_warn == true` 表示已用 ≥ 80%（方案 §7）。探测失败则省略字段。
 
+### 2.11 search / events.list — 检索与事件（M5 App 通道）
+
+App 经 Noise 配对调用，与 HTTP `/api/v1/search`、`/api/v1/events*` 语义对齐；
+不升协议版本（§12）。详见 [APP_CONSUMER_UI.md](APP_CONSUMER_UI.md)。
+
+```json
+// 全文检索（FTS5；q 必填非空）
+{"op": "search", "q": "关键词", "space": "artifacts", "device": "…", "state": "…", "limit": 50}
+→ {"op": "result", "data": {"query": "关键词", "total": 1, "results": [
+    {"uri": "store://…", "space": "artifacts", "device": "…", "path": "…",
+     "sha256": "…", "size": 35, "state": "committed", "snippet": "…", "score": -1.0}]}}
+
+// 事件列表（seq > since；升序；可选 kind 过滤）
+{"op": "events.list", "since": 0, "limit": 50, "kind": "handoff.created"}
+→ {"op": "result", "data": {"events": [/* StoreEvent */], "latest_seq": 12}}
+```
+
+- ACL：同 `stats`（owner 允许；friend → `untrusted`）。
+- `search`：可选 `space`/`device`/`state`/`limit`（默认 50，上限 200）；
+  未知 space 名 → `bad_op`。
+- `events.list`：`since` 缺省 0；无事件总线时返回空列表与 `latest_seq: 0`。
+
 ## 3. ACL 矩阵
 
 调用者身份 = Noise 会话对端公钥哈希（= 其 device_id）。master 据此构造写目标目录。
@@ -462,9 +484,10 @@ master 定期（与日快照同节奏）或迁移后：将各 `<device_id>/<spac
   - 加密套件 / prologue / 传输通道改变；
   - 安全边界收窄（ACL 语义收紧必须双端同步并升版本）。
 - 已落地的 v4.2 增量 op（随里程碑落地，先有 fixture 契约）：`versions.list` / `versions.read` / `manifest`（M2）、`handoff.create` / `handoff.ack` / `artifact.state`（M3）。
-- 已落地的 v4.3 增量 op：`space.declare`（仅 loopback / admin）、`space.list`（owner）。
+- 已落地的 v4.3 增量 op：`space.declare`（仅 loopback / admin）、`space.list`（owner）、
+  `search` / `events.list`（M5 App 通道，§2.11）。
 - 事件：`StoreEvent` 携带单调 `seq`；`.system/events.jsonl` 持久化；watcher 用
-  `GET /api/v1/events?since=<seq>` 重放历史再切实时（不丢不重）。
+  `GET /api/v1/events?since=<seq>` 或帧 `events.list` 重放历史再切实时（不丢不重）。
 - v3 → v4：新增 `sync.cursors` / `master.pointer` / `master.pointer.query` /
   `master.migrate`。v3 客户端忽略未知 op 通知，互操作不受影响。
 - **agent 身份承载（M4 已实现，v4.2 定稿边界）**：`store.*` 帧仍以设备身份鉴权，

@@ -25,13 +25,18 @@
 
 ## C. ShePaw App 消费层（协议已就绪，UI 未做）
 
+> 最小设计：[APP_CONSUMER_UI.md](APP_CONSUMER_UI.md)。App 通道为 store 帧
+> `search` / `events.list`（§2.11），不依赖 admin token。
+
 | 项 | 状态 | 依赖 |
 |----|------|------|
-| 版本浏览 UI（StorageBrowserScreen 版本列表 / 血缘 manifest 入口） | 待实现 | M2 协议 + StoreService.versionsList/versionsRead（已就绪） |
-| 交接通知展示（`handoff.created`；自动 ack 已做） | 待实现 | M3 事件 |
-| 搜索框（调 `/api/v1/search`） | 待实现 | M5 API（已就绪） |
-| agents 列表展示（App 存储管理页接 admin API） | 待实现 | M4 admin API（已就绪） |
-| Dart 自定义空间 URI 解析（`parseStoreUri` 仍严格四空间；ACL 已对齐） | 待实现 | StoreSpace.isValidSyntax（已就绪） |
+| 最小 UI 设计文档 | ✅ | APP_CONSUMER_UI.md |
+| store 帧 `search` / `events.list`（双端） | ✅ | spec §2.11 + fixture |
+| 版本浏览 UI（StorageBrowserScreen 版本列表 / 血缘 manifest 入口） | ✅ | 文件行 → 版本/血缘 |
+| 交接通知展示（`handoff.created`；自动 ack 已做） | ✅ | HandoffNotifyService 轮询 + 总览告警 |
+| 搜索框（调 store 帧 `search`） | ✅ | Browser AppBar SearchDelegate |
+| agents 列表展示（App 存储管理页接 admin API） | ✅ 薄层 | NAS 页外链节点 `/admin`（无 App 内 token） |
+| Dart 自定义空间 URI 解析（`parseStoreUri` 仍严格四空间；ACL 已对齐） | ✅ | `isValidSyntax` + fixture 更新 |
 
 ## D. agent-bridge / MCP
 
@@ -53,8 +58,8 @@
 
 | 项 | 状态 | 依赖 |
 |----|------|------|
-| 真机集成基线 QA（配对/同步/版本/交接/检索，见 QA_BASELINE.md 手工清单） | 待执行（需硬件） | 无 |
-| agent-bridge vitest 在 Node 24 下启动失败（vite 兼容问题） | 待修复 | 锁 Node 版本或升级 vite |
+| 真机集成基线 QA（配对/同步/版本/交接/检索，见 QA_BASELINE.md 手工清单） | 部分：自动化绿（cargo 69 / flutter protocol 16）；curl search/versions 冒烟过；§1–5 手工待真机 | 需 App + 局域网 |
+| agent-bridge vitest 在 Node 24 下启动失败（vite 兼容问题） | ✅ 已缓解（vite ^5.4 + `.nvmrc` 钉 Node 20；store-tools mock 路径修复） | 曾误诊为启动失败；现为可选环境对齐 |
 | 18787 旧 nexuspouch 实例数据根目录确认（此前误杀，如需恢复） | 待确认 | 用户原启动命令 |
 
 ## G. 产品层（聊过，未成文/未实现）
@@ -79,7 +84,7 @@
 
 | 优先级 | 项 | 理由 |
 |--------|----|------|
-| P0（尽快） | F：vitest 兼容、真机 QA | 收尾稳定性，避免环境债 |
+| P0（尽快） | F：真机 QA（vitest 已缓解） | 收尾稳定性，避免环境债 |
 | P1（产品价值） | C：App 消费 UI（版本/搜索/交接通知） | 让 M2-M5 能力对用户可见 |
 | P2（完整性） | B、D：绑定增强、MCP handoff 透传 | 完善 M6 与生态入口 |
 | P3（需决策） | E：Dart master 服务端、Windows | 架构取舍，先讨论再投入 |

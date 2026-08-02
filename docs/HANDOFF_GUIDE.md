@@ -31,7 +31,7 @@
 |------|--------------|------|
 | A 空间配额/按空间导入授权（Step 3） | SPACE_BOUNDARY_DESIGN.md（Step 3）+ spec §0.5 | 预留不承诺，先讨论 |
 | B M6 绑定增强（rename/半写/上限/原生 reflink） | M6_FOLDER_BINDING.md §3-§6、§13 | 核心已落地，增强项 |
-| C ShePaw App 消费 UI（版本/交接通知/搜索/agents） | spec v4.3 §1.5/§2.9 + API.md + CLIENT_PROFILES.md + shepaw 现有实现 | **缺专门 UI 设计文档，先补最小设计** |
+| C ShePaw App 消费 UI（版本/交接通知/搜索/agents） | [APP_CONSUMER_UI.md](APP_CONSUMER_UI.md) + spec §2.11 + shepaw 现有实现 | 最小设计已补；实现按该文档切片 |
 | D agent-bridge/MCP（网关注入/handoff 透传/订阅） | agent-bridge 仓库 README + examples/mcp + store-tools.ts + AGENTS.md | 跨仓库 |
 | E 双端缺口（Dart master 服务端、Windows） | spec v4.3 + SPACE_BOUNDARY_DESIGN.md | 需先决策是否投入 |
 | F 运维/QA（真机、vitest Node24） | QA_BASELINE.md + DEVICE_TESTING.md；vitest 在 agent-bridge 仓库 | 真机需硬件 |
@@ -56,8 +56,9 @@
 - ShePaw：`flutter test test/storage/` 全绿（协议 16+、绑定 2、其他按既有基线）；
 - 已知既有 flake：`snapshot_service_test` 恢复计数与 `scheduled_snapshot_test`
   密码变更（基线同样失败，与协议无关，勿"顺手修"）；
-- agent-bridge：本机 vitest 因 vite/Node 24 不兼容起不来，用
-  `npx tsc --noEmit` + CI 验证；不要顺手升级大版本依赖。
+- agent-bridge：推荐 Node 20（`.nvmrc` / Docker）；vitest 2.1 + vite 5.4
+  在 Node 22 也可启动。不要顺手升级 vitest/vite 大版本；日常可用
+  `npm test` + `npx tsc --noEmit`。
 
 ### 分支与提交
 
@@ -93,9 +94,9 @@
 
 ## 6. 建议的接手顺序
 
-1. **P0（收尾）**：F——vitest 兼容修复（agent-bridge）、真机 QA 执行；
-2. **P1（产品价值）**：C——先补 App 消费 UI 设计，再实现版本浏览/搜索/交接通知；
-3. **P2（完整性）**：B、D——绑定增强与 MCP handoff 透传；
+1. **P0（收尾）**：F——vitest 已缓解（钉 Node 20）；真机 QA 仍待执行；
+2. **P1（产品价值）**：C——App 消费 UI 已落地（设计 + search/events 帧 + Browser/通知）；
+3. **P2（完整性）**：B、D——绑定增强与 MCP handoff 透传（下一项）；
 4. **P3（需决策）**：E——Dart master 服务端、Windows；
 5. **P4（不承诺）**：A、G——空间配额、快照薄层（先讨论后投入）；
 6. **新方向**：H——向量搜索按 VECTOR_SEARCH_DESIGN.md 的 P1-P3 推进。

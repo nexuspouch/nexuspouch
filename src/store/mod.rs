@@ -211,6 +211,8 @@ impl Local {
             "commit" => write::commit(self, &frame, caller),
             "delete" => browse::delete(self, &frame, caller),
             "stats" => browse::stats(self),
+            "search" => self.op_search(&frame),
+            "events.list" => self.op_events_list(&frame),
             "recycle.list" => browse::recycle_list(self),
             "recycle.restore" => browse::recycle_restore(self, &frame),
             "recycle.empty" => browse::recycle_empty(self),
@@ -361,6 +363,85 @@ impl Local {
         self.index
             .search(q, space, device, state, limit)
             .map_err(|e| OpError::new("internal", e))
+    }
+
+    fn op_search(&self, frame: &Frame) -> Result<Map<String, Value>, OpError> {
+        let q = frame
+            .payload
+            .get("q")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if q.is_empty() {
+            return Err(OpError::new("bad_op", "search requires non-empty q"));
+        }
+        let space = frame.payload.get("space").and_then(|v| v.as_str());
+        if let Some(sp) = space {
+            if !self.spaces.is_known(sp) {
+                return Err(OpError::new("bad_op", "unknown space"));
+            }
+        }
+        let device = frame.payload.get("device").and_then(|v| v.as_str());
+        if let Some(d) = device {
+            if !protocol::is_valid_device_id(d) {
+                return Err(OpError::new("bad_op", "invalid device"));
+            }
+        }
+        let state = frame.payload.get("state").and_then(|v| v.as_str());
+        let limit = any_to_i64(frame.payload.get("limit").unwrap_or(&Value::Null))
+            .unwrap_or(50)
+            .clamp(1, 200) as usize;
+        let results = self.search_index(q, space, device, state, limit)?;
+        Ok(Map::from_iter([
+            ("query".into(), json!(q)),
+            ("total".into(), json!(results.len())),
+            ("results".into(), json!(results)),
+        ]))
+    }
+
+    fn op_events_list(&self, frame: &Frame) -> Result<Map<String, Value>, OpError> {
+        let since = any_to_i64(frame.payload.get("since").unwrap_or(&json!(0)))
+            .unwrap_or(0)
+            .max(0) as u64;
+        let limit = any_to_i64(frame.payload.get("limit").unwrap_or(&json!(50)))
+            .unwrap_or(50)
+            .clamp(1, 200) as usize;
+        let kind = frame.payload.get("kind").and_then(|v| v.as_str());
+        let bus = self.event_bus.lock().unwrap().clone();
+        let Some(bus) = bus else {
+            return Ok(Map::from_iter([
+                ("events".into(), json!([])),
+                ("latest_seq".into(), json!(0)),
+            ]));
+        };
+        let mut events = bus.replay(since);
+        if events.is_empty() && since == 0 {
+            events = bus.recent();
+        } else if events.is_empty() {
+            events = bus
+                .recent()
+                .into_iter()
+                .filter(|e| e.seq > since)
+                .collect();
+        }
+        if let Some(k) = kind {
+            events.retain(|e| e.kind == k);
+        }
+        if events.len() > limit {
+            events.truncate(limit);
+        }
+        let latest_seq = events.iter().map(|e| e.seq).max().unwrap_or(since);
+        let latest_seq = latest_seq.max(
+            bus.recent()
+                .iter()
+                .map(|e| e.seq)
+                .max()
+                .unwrap_or(latest_seq),
+        );
+        Ok(Map::from_iter([
+            ("events".into(), json!(events)),
+            ("latest_seq".into(), json!(latest_seq)),
+        ]))
     }
 
     pub fn rebuild_index(&self) -> Result<usize, OpError> {
@@ -712,6 +793,72 @@ mod tests {
         let err = store
             .handle(
                 Frame::from_parts("list", mystery),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "bad_op");
+    }
+
+    #[test]
+    fn search_and_events_list_frames() {
+        let dir = tempfile::tempdir().unwrap();
+        let device = "aaaaaaaaaaaaaaaa";
+        let store = Local::open(dir.path(), device).unwrap();
+        let bus = crate::events::EventBus::open(dir.path());
+        store.set_event_bus(bus.clone());
+
+        store.index_file(&index::IndexEntry {
+            uri: format!("store://artifacts/{device}/t-1/out.md"),
+            space: "artifacts".into(),
+            device: device.into(),
+            path: "t-1/out.md".into(),
+            sha256: "a".repeat(64),
+            size: 12,
+            mtime: 0,
+            task: "t-1".into(),
+            state: "published".into(),
+            summary: None,
+            body: "handoff zebra99 payload".into(),
+        });
+
+        let mut q = Map::new();
+        q.insert("q".into(), json!("zebra99"));
+        q.insert("space".into(), json!("artifacts"));
+        let out = store
+            .handle(
+                Frame::from_parts("search", q),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap();
+        assert_eq!(out["total"], 1);
+        assert_eq!(out["results"][0]["path"], "t-1/out.md");
+
+        bus.publish(
+            crate::events::StoreEvent::new("handoff.created", device)
+                .with_uri(format!("store://artifacts/{device}/t-1/out.md")),
+        );
+        let mut ev = Map::new();
+        ev.insert("since".into(), json!(0));
+        ev.insert("kind".into(), json!("handoff.created"));
+        let out = store
+            .handle(
+                Frame::from_parts("events.list", ev),
+                device,
+                protocol::TRUST_OWNER,
+                false,
+            )
+            .unwrap();
+        assert!(out["latest_seq"].as_u64().unwrap() >= 1);
+        assert_eq!(out["events"].as_array().unwrap().len(), 1);
+        assert_eq!(out["events"][0]["kind"], "handoff.created");
+
+        let err = store
+            .handle(
+                Frame::from_parts("search", Map::from_iter([("q".into(), json!(""))])),
                 device,
                 protocol::TRUST_OWNER,
                 false,
