@@ -75,12 +75,15 @@ trait Embedder {
 - 分块：≤512 token/块、重叠 64；优先 embedding manifest.summary（便宜）+ 正文文本块；
 - 重嵌入：模型变更 / 内容变更（版本化驱动）时按 uri 重算。
 
-## 4. `memory` 空间（P2）
+## 4. `memory` 空间（P2）— 已落地
 
-- 新增 `memory` 空间 profile（默认 private，可配 shared；`encryption: client|none`）；
-- 约定：蒸馏记忆条目写入 `<device>/memory/<topic>/<ts>.md`（复用 she-network digest 概念），
-  manifest 血缘 / 版本 / 交接自动适用（现有钩子）；
-- 检索：`store_search(semantic: true, space: memory)`。
+- 节点 `Local::open` 自动 `ensure_memory()`：well-known 自定义空间
+  （默认 private / client / keep_last / import denied）；
+- 约定见 [CLIENT_PROFILES.md](CLIENT_PROFILES.md) §2.2.6：
+  `store://memory/<device>/<topic>/<ts>.md`；
+- admin Spaces 列表标注 `well-known` + convention；
+- 检索：`store_search(semantic: true, space: memory)` /
+  帧 `search` 同参。
 
 ## 5. 混合检索（P3）
 

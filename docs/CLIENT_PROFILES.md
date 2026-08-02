@@ -48,6 +48,7 @@
 | `files` | 用户文件 | 无特殊约定 |
 | `attachments` | 聊天附件 | hash 寻址（§2.2.2） |
 | `backups` | DB 快照 + 设备身份 | 快照格式（§2.2.1）、GFS（§2.2.3） |
+| `memory` | 蒸馏记忆（well-known 自定义空间） | 路径约定（§2.2.6）；默认 private + client 加密 |
 
 ### 2.2 约定明细
 
@@ -87,6 +88,23 @@
 
 - 距上次成功快照（或启用锚点）超过 3 天 → 显著告警（按墙钟）；
 - 未同步队列 ≥200MB、master 卷 ≥80% → 存储页告警。
+
+#### 2.2.6 蒸馏记忆（scope: memory）
+
+节点启动时自动声明 well-known 空间 `memory`（默认
+`visibility=private` / `encryption=client` / `retention=keep_last` /
+`import_grant=denied`；可经 admin 另行调整属性语义以外的业务约定仍属客户端）。
+
+路径约定（节点不校验，仅约定）：
+
+```text
+store://memory/<device_id>/<topic>/<ts>.md
+```
+
+- `topic`：短标识（如 `prefs` / `project-foo`）；
+- `ts`：毫秒时间戳或 ISO 日戳，便于排序；
+- 正文建议含一行摘要（进入 FTS5 / 向量索引）；血缘 / 版本 / 交接钩子与其他空间相同；
+- 语义检索：`search {q, space:"memory", semantic:true}`。
 
 ## 3. 新增 Profile 或约定的流程
 

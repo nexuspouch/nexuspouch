@@ -14,6 +14,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const BUILTIN_SPACES: [&str; 4] = ["artifacts", "files", "attachments", "backups"];
 
+/// Well-known custom space for distilled agent memory (vector search P2).
+pub const MEMORY_SPACE: &str = "memory";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpaceProfile {
     pub name: String,
@@ -118,6 +121,15 @@ impl SpaceRegistry {
         BUILTIN_SPACES.contains(&name) || self.get(name).is_some()
     }
 
+    /// Seed the well-known `memory` space if missing (VECTOR_SEARCH_DESIGN P2).
+    /// Default: private, client encryption, keep_last, import denied.
+    pub fn ensure_memory(&self) -> Result<SpaceProfile, String> {
+        if let Some(p) = self.get(MEMORY_SPACE) {
+            return Ok(p);
+        }
+        self.declare(MEMORY_SPACE, "private", "client", "keep_last", "denied")
+    }
+
     /// Visibility for ACL: `Some(shared?)` for known spaces, `None` unknown.
     pub fn visibility(&self, name: &str) -> Option<bool> {
         match name {
@@ -145,7 +157,7 @@ impl SpaceRegistry {
             })
             .collect();
         for s in self.list() {
-            out.push(json!({
+            let mut row = json!({
                 "name": s.name,
                 "builtin": false,
                 "visibility": s.visibility,
@@ -153,7 +165,18 @@ impl SpaceRegistry {
                 "retention": s.retention,
                 "import_grant": s.import_grant,
                 "created_ms": s.created_ms,
-            }));
+            });
+            if s.name == MEMORY_SPACE {
+                row.as_object_mut().unwrap().insert(
+                    "well_known".into(),
+                    json!(true),
+                );
+                row.as_object_mut().unwrap().insert(
+                    "convention".into(),
+                    json!("<device>/memory/<topic>/<ts>.md"),
+                );
+            }
+            out.push(row);
         }
         json!(out)
     }
@@ -221,5 +244,27 @@ mod tests {
         assert!(reg2.is_known("models"));
         let listed = reg2.list_json();
         assert_eq!(listed.as_array().unwrap().len(), 5); // 4 builtin + models
+    }
+
+    #[test]
+    fn ensure_memory_seeds_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = SpaceRegistry::open(dir.path());
+        let p1 = reg.ensure_memory().unwrap();
+        assert_eq!(p1.name, "memory");
+        assert_eq!(p1.visibility, "private");
+        assert_eq!(p1.encryption, "client");
+        let p2 = reg.ensure_memory().unwrap();
+        assert_eq!(p1.created_ms, p2.created_ms);
+        let mem = reg
+            .list_json()
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == "memory")
+            .unwrap()
+            .clone();
+        assert_eq!(mem["well_known"], true);
+        assert!(mem["convention"].as_str().unwrap().contains("<topic>"));
     }
 }

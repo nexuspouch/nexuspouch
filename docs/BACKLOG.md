@@ -74,7 +74,7 @@
 | 项 | 状态 | 依赖 |
 |----|------|------|
 | P1：embedder 抽象（默认本地 ONNX 小模型）+ embeddings 表 + 帧/HTTP/MCP `semantic` 查询 + 手机 master 降级语义 | ✅ 骨架（`local-hash-v0` 本地默认；ONNX 待换；Remote 可选；semantic 降级） | VECTOR_SEARCH_DESIGN.md；分支 `codex/vector-p1` |
-| P2：`memory` 空间 profile + 蒸馏记忆写入约定 + 管理页 | 待实现 | P1 |
+| P2：`memory` 空间 profile + 蒸馏记忆写入约定 + 管理页 | ✅ | ensure_memory + CLIENT_PROFILES §2.2.6 + admin 标注 |
 | P3：FTS5+向量 RRF 混合排序 + 重嵌入策略 + 规模评估（HNSW 与否） | 待实现 | P1/P2 |
 
 设计要点：向量能力绑定 master（PC/NAS）；手机经 store 帧查询、不做本地向量；

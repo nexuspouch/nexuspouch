@@ -95,7 +95,7 @@ impl Local {
         }
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(&root).map_err(io_err)?;
-        for sp in ["artifacts", "files", "attachments", "backups"] {
+        for sp in ["artifacts", "files", "attachments", "backups", spaces::MEMORY_SPACE] {
             std::fs::create_dir_all(root.join(device_id).join(sp)).map_err(io_err)?;
         }
         std::fs::create_dir_all(root.join(".recycle")).map_err(io_err)?;
@@ -115,6 +115,8 @@ impl Local {
             spaces: spaces::SpaceRegistry::open(&root),
             audit: AuditLog::open(&root),
         };
+        // Well-known memory space for distilled agent recall (vector P2).
+        let _ = local.spaces.ensure_memory();
         let ptr_path = local.pointer_path();
         if !ptr_path.exists() {
             local.save_pointer(&MasterPointer {
@@ -843,6 +845,7 @@ mod tests {
             .collect();
         assert!(names.contains(&"models"));
         assert!(names.contains(&"files"));
+        assert!(names.contains(&"memory"));
 
         // Unknown (undeclared) space denied.
         let mut mystery = Map::new();
