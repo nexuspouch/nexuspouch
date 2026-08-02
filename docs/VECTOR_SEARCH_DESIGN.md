@@ -1,12 +1,13 @@
 # 向量搜索设计（Vector Search）
 
-> 状态：P1 骨架已落地（2026-08-02，分支 `codex/vector-p1`）
+> 状态：P1 本地 ONNX 已落地（2026-08-02，分支 `codex/vector-p1`）
 > 核心决策：**向量能力绑定 master（常开 PC/NAS）**；手机只做客户端查询，
 > 不在移动端保存模型/索引/embedding。默认本地 embedding，远程 API 仅显式可选。
 >
-> P1 实现备注：默认 embedder 为离线 `local-hash-v0`（特征哈希，保隐私、免下模型）；
-> 配置 `NEXUSPOUCH_EMBED_URL` 走远程；`NEXUSPOUCH_EMBED=off` 强制降级 FTS5。
-> ONNX bge-small 替换为后续增量。
+> P1 实现备注：默认 embedder 为 `local-onnx:BGESmallZHV15`（fastembed/ort，
+> 首次可下载模型；失败回退 `local-hash-v0`）。`NEXUSPOUCH_EMBED=hash` 强制哈希；
+> `NEXUSPOUCH_EMBED_URL` 走远程；`NEXUSPOUCH_EMBED=off` 强制降级 FTS5。
+> Cargo feature `onnx`（default）可 `--no-default-features` 关闭。
 
 ## 0. 结论摘要
 
@@ -62,10 +63,17 @@ trait Embedder {
 }
 ```
 
-- `LocalEmbedder`（默认）：ONNX 小模型（bge-small-zh / e5-small 级），CPU 推理；
+- `OnnxEmbedder`（默认，feature `onnx`）：fastembed + ort，默认
+  `BGESmallZHV15`（512 维）；可用 `NEXUSPOUCH_EMBED_MODEL` 选
+  `bge-small-en` / `multilingual-e5-small` 等；
+  - 首次可经 HuggingFace 下载（`HF_ENDPOINT` 可指镜像）；失败回退 hash；
+  - 离线推荐 `NEXUSPOUCH_EMBED_MODEL_DIR`（含 `model.onnx` + tokenizer 四件套）；
+  - 缓存目录 `NEXUSPOUCH_EMBED_CACHE` / `FASTEMBED_CACHE_DIR`；
+- `HashingEmbedder`（回退 / `NEXUSPOUCH_EMBED=hash` / 测试默认）：`local-hash-v0`；
 - `RemoteEmbedder`（可选）：OpenAI 兼容 `/embeddings`，需用户显式配置；
-- 配置：`NEXUSPOUCH_EMBED_MODEL` / `NEXUSPOUCH_EMBED_URL` / `NEXUSPOUCH_EMBED_TOKEN`；
-- 隐私：默认本地；启用远程时文档与 UI 明示"向量出机"。
+- 配置：`NEXUSPOUCH_EMBED` / `_MODEL` / `_MODEL_DIR` / `_URL` / `_TOKEN` /
+  `_CACHE` / `_THREADS` / `_DIMS`；
+- 隐私：默认本地；启用远程时文档与 UI 明示"向量出机"；MSRV ≥ 1.88（ort）。
 
 ### 3.4 存储与索引
 

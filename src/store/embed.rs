@@ -1,8 +1,9 @@
 //! Embedding providers for vector search (VECTOR_SEARCH_DESIGN.md P1).
 //!
-//! - Default local: deterministic hashing embedder (`local-hash-v0`) — offline,
-//!   privacy-preserving interim until ONNX bge-small lands.
-//! - Optional remote: OpenAI-compatible `/embeddings` via env.
+//! - Default local: ONNX via `fastembed` (`bge-small-zh-v1.5`); first run may
+//!   download the model into the cache dir. On load failure → `local-hash-v0`.
+//! - `NEXUSPOUCH_EMBED=hash` forces the hashing embedder (tests / offline CI).
+//! - Optional remote: OpenAI-compatible `/embeddings` via `NEXUSPOUCH_EMBED_URL`.
 //! - `NEXUSPOUCH_EMBED=off` → unavailable (semantic queries degrade to FTS5).
 
 use serde_json::Value;
@@ -41,6 +42,39 @@ pub fn from_env() -> Arc<dyn Embedder> {
             });
         }
     }
+    if mode == "hash" {
+        return hashing_from_env();
+    }
+
+    #[cfg(feature = "onnx")]
+    {
+        // Tests stay offline by default; set NEXUSPOUCH_EMBED=onnx to exercise ONNX.
+        let try_onnx = mode == "onnx"
+            || mode == "local"
+            || mode == "auto"
+            || (mode.is_empty() && !cfg!(test));
+        if try_onnx {
+            match OnnxEmbedder::try_from_env() {
+                Ok(e) => {
+                    tracing::info!(embedder = e.name(), dims = e.dims(), "onnx embedder ready");
+                    return Arc::new(e);
+                }
+                Err(err) => {
+                    tracing::warn!(%err, "onnx embedder unavailable; falling back to local-hash-v0");
+                }
+            }
+        }
+    }
+
+    #[cfg(not(feature = "onnx"))]
+    if mode == "onnx" || mode == "local" {
+        tracing::warn!("built without `onnx` feature; using local-hash-v0");
+    }
+
+    hashing_from_env()
+}
+
+fn hashing_from_env() -> Arc<dyn Embedder> {
     let dims = std::env::var("NEXUSPOUCH_EMBED_DIMS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -66,8 +100,7 @@ impl Embedder for UnavailableEmbedder {
 }
 
 /// Local offline embedder: feature-hashing bag-of-tokens into a fixed vector.
-/// Not a substitute for bge-small quality; keeps the pipeline and privacy story
-/// working without a model download (ONNX swap-in later).
+/// Fallback when ONNX is disabled, fails to load, or tests force `hash`.
 pub struct HashingEmbedder {
     pub dims: usize,
 }
@@ -97,6 +130,164 @@ impl Embedder for HashingEmbedder {
         Ok(v)
     }
 }
+
+#[cfg(feature = "onnx")]
+mod onnx {
+    use super::{l2_normalize, Embedder};
+    use fastembed::{
+        EmbeddingModel, InitOptionsUserDefined, Pooling, TextEmbedding, TextInitOptions,
+        TokenizerFiles, UserDefinedEmbeddingModel,
+    };
+    use std::path::{Path, PathBuf};
+    use std::str::FromStr;
+    use std::sync::Mutex;
+
+    /// ONNX local embedder (fastembed / ort). Default model: BGE small zh v1.5.
+    pub struct OnnxEmbedder {
+        name: String,
+        dims: usize,
+        model: Mutex<TextEmbedding>,
+    }
+
+    impl OnnxEmbedder {
+        pub fn try_from_env() -> Result<Self, String> {
+            // Prefer a pre-fetched directory (offline / mirror / air-gapped).
+            // Layout: model.onnx + tokenizer.json + config.json +
+            // special_tokens_map.json + tokenizer_config.json
+            // (onnx/model.onnx also accepted).
+            if let Ok(dir) = std::env::var("NEXUSPOUCH_EMBED_MODEL_DIR") {
+                let dir = dir.trim();
+                if !dir.is_empty() {
+                    return Self::from_model_dir(Path::new(dir));
+                }
+            }
+            let model = resolve_model()?;
+            let dims = TextEmbedding::get_model_info(&model)
+                .map(|m| m.dim)
+                .map_err(|e| e.to_string())?;
+            let mut opts = TextInitOptions::new(model.clone()).with_show_download_progress(true);
+            if let Ok(cache) = std::env::var("NEXUSPOUCH_EMBED_CACHE") {
+                let p = PathBuf::from(cache.trim());
+                if !p.as_os_str().is_empty() {
+                    opts = opts.with_cache_dir(p);
+                }
+            }
+            if let Ok(threads) = std::env::var("NEXUSPOUCH_EMBED_THREADS") {
+                if let Ok(n) = threads.parse::<usize>() {
+                    opts = opts.with_intra_threads(n.max(1));
+                }
+            }
+            let text = TextEmbedding::try_new(opts).map_err(|e| {
+                format!(
+                    "onnx init: {e} (tip: set HF_ENDPOINT or NEXUSPOUCH_EMBED_MODEL_DIR for offline/mirror)"
+                )
+            })?;
+            Ok(Self {
+                name: format!("local-onnx:{model}"),
+                dims,
+                model: Mutex::new(text),
+            })
+        }
+
+        pub fn from_model_dir(dir: &Path) -> Result<Self, String> {
+            let onnx_path = [
+                dir.join("model.onnx"),
+                dir.join("onnx").join("model.onnx"),
+                dir.join("model_optimized.onnx"),
+            ]
+            .into_iter()
+            .find(|p| p.is_file())
+            .ok_or_else(|| format!("onnx model missing under {}", dir.display()))?;
+            let read = |name: &str| {
+                std::fs::read(dir.join(name))
+                    .map_err(|e| format!("read {}: {e}", dir.join(name).display()))
+            };
+            let user = UserDefinedEmbeddingModel::new(
+                std::fs::read(&onnx_path)
+                    .map_err(|e| format!("read {}: {e}", onnx_path.display()))?,
+                TokenizerFiles {
+                    tokenizer_file: read("tokenizer.json")?,
+                    config_file: read("config.json")?,
+                    special_tokens_map_file: read("special_tokens_map.json")?,
+                    tokenizer_config_file: read("tokenizer_config.json")?,
+                },
+            )
+            .with_pooling(Pooling::Cls);
+            let mut opts = InitOptionsUserDefined::new();
+            if let Ok(threads) = std::env::var("NEXUSPOUCH_EMBED_THREADS") {
+                if let Ok(n) = threads.parse::<usize>() {
+                    opts = opts.with_intra_threads(n.max(1));
+                }
+            }
+            let text = TextEmbedding::try_new_from_user_defined(user, opts)
+                .map_err(|e| format!("onnx local dir init: {e}"))?;
+            let dims = std::env::var("NEXUSPOUCH_EMBED_DIMS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_else(|| {
+                    // Probe once to discover dims when not set.
+                    0
+                });
+            let mut emb = Self {
+                name: format!("local-onnx:dir:{}", dir.display()),
+                dims: dims.max(1),
+                model: Mutex::new(text),
+            };
+            if dims == 0 {
+                let probe = emb.embed("probe")?;
+                emb.dims = probe.len();
+            }
+            Ok(emb)
+        }
+    }
+
+    fn resolve_model() -> Result<EmbeddingModel, String> {
+        let raw = std::env::var("NEXUSPOUCH_EMBED_MODEL").unwrap_or_default();
+        let s = raw.trim();
+        if s.is_empty() {
+            // Product default: Chinese-capable small BGE (design §3.3).
+            return Ok(EmbeddingModel::BGESmallZHV15);
+        }
+        let lower = s.to_lowercase();
+        match lower.as_str() {
+            "bge-small-zh" | "bge-small-zh-v1.5" | "zh" | "bgesmallzhv15" => {
+                Ok(EmbeddingModel::BGESmallZHV15)
+            }
+            "bge-small-en" | "bge-small-en-v1.5" | "en" | "bgesmallenv15" => {
+                Ok(EmbeddingModel::BGESmallENV15)
+            }
+            "bge-small-en-q" | "bgesmallenv15q" => Ok(EmbeddingModel::BGESmallENV15Q),
+            "multilingual-e5-small" | "e5-small" | "multilinguale5small" => {
+                Ok(EmbeddingModel::MultilingualE5Small)
+            }
+            _ => EmbeddingModel::from_str(s),
+        }
+    }
+
+    impl Embedder for OnnxEmbedder {
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn dims(&self) -> usize {
+            self.dims
+        }
+        fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
+            let mut guard = self
+                .model
+                .lock()
+                .map_err(|_| "onnx embedder lock poisoned".to_string())?;
+            let mut out = guard
+                .embed(vec![text], None)
+                .map_err(|e| format!("onnx embed: {e}"))?;
+            let mut v = out.pop().ok_or_else(|| "onnx embed empty".to_string())?;
+            l2_normalize(&mut v);
+            Ok(v)
+        }
+    }
+}
+
+#[cfg(feature = "onnx")]
+pub use onnx::OnnxEmbedder;
 
 pub struct RemoteEmbedder {
     pub url: String,
@@ -235,5 +426,34 @@ mod tests {
         let e = UnavailableEmbedder;
         assert!(!e.available());
         assert!(e.embed("x").is_err());
+    }
+
+    #[test]
+    fn from_env_defaults_to_hash_under_test() {
+        // cfg(test) path: empty NEXUSPOUCH_EMBED → hash (no model download).
+        std::env::remove_var("NEXUSPOUCH_EMBED");
+        std::env::remove_var("NEXUSPOUCH_EMBED_URL");
+        let e = from_env();
+        assert_eq!(e.name(), HashingEmbedder::NAME);
+    }
+
+    #[test]
+    #[ignore = "needs ONNX model: set NEXUSPOUCH_EMBED_MODEL_DIR or allow HF download"]
+    fn onnx_embedder_smoke() {
+        #[cfg(feature = "onnx")]
+        {
+            std::env::remove_var("NEXUSPOUCH_EMBED_URL");
+            let e = OnnxEmbedder::try_from_env().expect("onnx load");
+            assert!(e.name().starts_with("local-onnx:"));
+            assert!(e.dims() >= 384);
+            let a = e.embed("小猫喜欢喝牛奶").unwrap();
+            let b = e.embed("猫咪爱喝奶").unwrap();
+            let c = e.embed("quantum chromodynamics lattice").unwrap();
+            assert!(cosine(&a, &b) > cosine(&a, &c));
+        }
+        #[cfg(not(feature = "onnx"))]
+        {
+            panic!("rebuild with --features onnx");
+        }
     }
 }

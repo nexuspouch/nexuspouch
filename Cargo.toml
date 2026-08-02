@@ -2,6 +2,14 @@
 name = "nexuspouch"
 version = "0.1.0"
 edition = "2021"
+# ort (via fastembed) requires rustc >= 1.88
+rust-version = "1.88"
+
+[features]
+default = ["onnx"]
+# Local ONNX embeddings via fastembed (bge-small). Disable with --no-default-features
+# for slim CI builds that only need local-hash-v0.
+onnx = ["dep:fastembed"]
 
 [dependencies]
 snow = "0.9"
@@ -33,6 +41,7 @@ hmac = "0.12"
 rusqlite = { version = "0.32", features = ["bundled"] }
 notify = "8"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+fastembed = { version = "5", optional = true, default-features = false, features = ["ort-download-binaries-native-tls", "hf-hub-native-tls"] }
 
 [dev-dependencies]
 tempfile = "3"
