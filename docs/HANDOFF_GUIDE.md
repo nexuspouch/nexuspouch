@@ -33,7 +33,7 @@
 | B M6 绑定增强（rename/半写/上限/原生 reflink） | M6_FOLDER_BINDING.md §3-§6、§13 | 核心已落地，增强项 |
 | C ShePaw App 消费 UI（版本/交接通知/搜索/agents） | [APP_CONSUMER_UI.md](APP_CONSUMER_UI.md) + spec §2.11 + shepaw 现有实现 | 最小设计已补；实现按该文档切片 |
 | D agent-bridge/MCP（网关注入/handoff 透传/订阅） | agent-bridge 仓库 README + examples/mcp + store-tools.ts + AGENTS.md | 跨仓库 |
-| E 双端缺口（Dart master 服务端、Windows） | spec v4.3 + SPACE_BOUNDARY_DESIGN.md | 需先决策是否投入 |
+| E 双端缺口（Dart master 服务端、Windows） | spec v4.3 + SPACE_BOUNDARY_DESIGN.md | Dart master 服务端已决策**不实现**（master 能力归 Nexuspouch，App 仅客户端，手机 master 降级）；Windows 待决策 |
 | F 运维/QA（真机、vitest Node24） | QA_BASELINE.md + DEVICE_TESTING.md；vitest 在 agent-bridge 仓库 | 真机需硬件 |
 | G 快照管理薄层 | **未成文，先补设计**（建议并入 SPACE_BOUNDARY_DESIGN 或独立文档） | 只有讨论记录 |
 | H 向量搜索 P1-P3 | VECTOR_SEARCH_DESIGN.md（已定稿） | 按里程碑推进 |
@@ -101,5 +101,5 @@
    余 rename/FFI/App watcher、网关注入仍待；
 4. **P3（需决策）**：E——Dart master 服务端、Windows；
 5. **P4（不承诺）**：A、G——空间配额、快照薄层（先讨论后投入）；
-6. **新方向**：H——P1+P2 在 `codex/vector-p1`（local-hash + semantic 降级 +
-   `memory` 空间）；ONNX 替换 / RRF 混合仍待。
+6. **新方向**：H——P1+P2 在 `codex/vector-p1`（ONNX bge-small-zh 默认 +
+   hash 回退 + semantic 降级 + `memory` 空间）；RRF 混合仍待。

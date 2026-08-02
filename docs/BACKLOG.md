@@ -50,8 +50,8 @@
 
 | 项 | 状态 | 依赖 |
 |----|------|------|
-| Dart master 侧服务端：App 自己当 master（loopback）时 versions / handoff / 自定义空间的服务端逻辑 | 待决策（双实现架构固有尾巴） | 是否值得在 Dart LocalStore 补实现 |
-| Windows 平台支持（README 限定 macOS/Linux） | 待决策 | 平台适配 |
+| Dart master 侧服务端：App 自己当 master（loopback）时 versions / handoff / 自定义空间的服务端逻辑 | **已决策（2026-08-02）：不实现**。master 服务端能力只归 Nexuspouch；PC 单独安装服务；ShePaw App 仅做客户端。手机作 master 时增强能力（版本/交接/自定义空间/语义检索）按降级语义不可用，协议客户端能力保留 | 无 |
+| Windows 平台支持（README 限定 macOS/Linux） | 待决策（建议暂不支持，明确非目标） | 平台适配 |
 | versions 保留策略管理页 / 发布产物可视化 | 待实现（低优先） | M2 |
 
 ## F. 运维 / QA
@@ -73,7 +73,7 @@
 
 | 项 | 状态 | 依赖 |
 |----|------|------|
-| P1：embedder 抽象（默认本地 ONNX 小模型）+ embeddings 表 + 帧/HTTP/MCP `semantic` 查询 + 手机 master 降级语义 | ✅ 骨架（`local-hash-v0` 本地默认；ONNX 待换；Remote 可选；semantic 降级） | VECTOR_SEARCH_DESIGN.md；分支 `codex/vector-p1` |
+| P1：embedder 抽象（默认本地 ONNX 小模型）+ embeddings 表 + 帧/HTTP/MCP `semantic` 查询 + 手机 master 降级语义 | ✅（默认 `local-onnx:BGESmallZHV15`；失败/`hash`→`local-hash-v0`；Remote 可选；semantic 降级） | VECTOR_SEARCH_DESIGN.md；分支 `codex/vector-p1` |
 | P2：`memory` 空间 profile + 蒸馏记忆写入约定 + 管理页 | ✅ | ensure_memory + CLIENT_PROFILES §2.2.6 + admin 标注 |
 | P3：FTS5+向量 RRF 混合排序 + 重嵌入策略 + 规模评估（HNSW 与否） | 待实现 | P1/P2 |
 
