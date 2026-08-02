@@ -49,6 +49,7 @@
 | `attachments` | 聊天附件 | hash 寻址（§2.2.2） |
 | `backups` | DB 快照 + 设备身份 | 快照格式（§2.2.1）、GFS（§2.2.3） |
 | `memory` | 蒸馏记忆（well-known 自定义空间） | 路径约定（§2.2.6）；默认 private + client 加密 |
+| `sessions` | Agent 会话转写（well-known） | 路径约定（§2.2.7）；索引前 strict 清洗 |
 
 ### 2.2 约定明细
 
@@ -105,6 +106,23 @@ store://memory/<device_id>/<topic>/<ts>.md
 - `ts`：毫秒时间戳或 ISO 日戳，便于排序；
 - 正文建议含一行摘要（进入 FTS5 / 向量索引）；血缘 / 版本 / 交接钩子与其他空间相同；
 - 语义检索：`search {q, space:"memory", semantic:true}`。
+
+#### 2.2.7 Agent 会话历史（scope: sessions）
+
+节点启动时自动声明 well-known 空间 `sessions`（默认
+`visibility=private` / `encryption=client` / `retention=keep_last` /
+`import_grant=allowed`）。详见 [SESSION_HISTORY_DESIGN.md](SESSION_HISTORY_DESIGN.md)。
+
+路径约定：
+
+```text
+store://sessions/<device_id>/<agent>/<session_id>.jsonl
+```
+
+摄取：复用 M6 `--bind`，例如
+`nexuspouch --bind ~/.claude/projects=sessions/claude-code`。
+索引层默认 `strict` 清洗（`NEXUSPOUCH_SESSIONS_SCRUB=full` 可关闭）；
+原文仍完整保留在 private 空间。
 
 ## 3. 新增 Profile 或约定的流程
 

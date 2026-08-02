@@ -70,6 +70,7 @@ pub struct BindingReport {
     pub added: usize,
     pub updated: usize,
     pub deleted: usize,
+    pub renamed: usize,
     pub skipped: usize,
     pub scanned: usize,
     pub truncated: bool,
@@ -83,12 +84,24 @@ impl BindingReport {
             "added": self.added,
             "updated": self.updated,
             "deleted": self.deleted,
+            "renamed": self.renamed,
             "skipped": self.skipped,
             "scanned": self.scanned,
             "truncated": self.truncated,
             "errors": self.errors,
         })
     }
+}
+
+#[derive(Clone)]
+struct ScanEntry {
+    rel: String,
+    full: PathBuf,
+    size: i64,
+    mtime: i64,
+    sha: String,
+    dev: u64,
+    ino: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -146,8 +159,8 @@ impl BindingsRegistry {
         mode: &str,
         ignore: Vec<String>,
     ) -> Result<Binding, String> {
-        if space != "files" && space != "artifacts" {
-            return Err("bindings support files/artifacts spaces".into());
+        if space != "files" && space != "artifacts" && space != super::spaces::SESSIONS_SPACE {
+            return Err("bindings support files/artifacts/sessions spaces".into());
         }
         let norm_folder =
             protocol::normalize_path(if folder.is_empty() { "bind" } else { folder })
@@ -181,8 +194,117 @@ impl BindingsRegistry {
     }
 }
 
-/// Sync one binding: full scan + sha256/size/mtime diff, ingest via loopback
-/// frames (hooks fire), delete via recycle.
+fn binding_dest_rel(b: &Binding, rel: &str) -> String {
+    if b.folder.is_empty() {
+        rel.to_string()
+    } else {
+        format!("{}/{}", b.folder, rel)
+    }
+}
+
+fn file_dev_ino(meta: &fs::Metadata) -> (u64, u64) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (meta.dev(), meta.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        (0, 0)
+    }
+}
+
+fn index_entry_json(e: &ScanEntry) -> Value {
+    json!({
+        "sha": e.sha,
+        "size": e.size,
+        "mtime": e.mtime,
+        "dev": e.dev,
+        "ino": e.ino,
+    })
+}
+
+fn rename_bound_path(
+    local: &Local,
+    space: &str,
+    from_rel: &str,
+    to_rel: &str,
+) -> Result<(), String> {
+    let device = &local.device_id;
+    let from = super::browse::resolve_path(local, space, device, from_rel)
+        .map_err(|e| e.to_string())?;
+    let to =
+        super::browse::resolve_path(local, space, device, to_rel).map_err(|e| e.to_string())?;
+    if !from.is_file() {
+        return Err(format!("rename source missing: {from_rel}"));
+    }
+    if to.exists() {
+        return Err(format!("rename dest exists: {to_rel}"));
+    }
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&from, &to).map_err(|e| e.to_string())?;
+
+    let v_from = local
+        .root
+        .join(".versions")
+        .join(device)
+        .join(space)
+        .join(from_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let v_to = local
+        .root
+        .join(".versions")
+        .join(device)
+        .join(space)
+        .join(to_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+    if v_from.exists() {
+        if let Some(parent) = v_to.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::rename(&v_from, &v_to);
+    }
+
+    let from_uri = format!("store://{space}/{device}/{from_rel}");
+    let to_uri = format!("store://{space}/{device}/{to_rel}");
+    local.remove_index(&from_uri);
+    // Rebuild index entry from the renamed live file.
+    if let Ok(meta) = fs::metadata(&to) {
+        let (sha, size) = super::browse::file_sha(&to);
+        let body = if size as usize <= 1024 * 1024 {
+            fs::read_to_string(&to).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        local.index_file(&super::index::IndexEntry {
+            uri: to_uri.clone(),
+            space: space.into(),
+            device: device.into(),
+            path: to_rel.into(),
+            sha256: sha,
+            size,
+            mtime: mtime_ms(&meta),
+            task: super::manifest::task_root(to_rel).unwrap_or_default(),
+            state: "committed".into(),
+            summary: None,
+            body,
+        });
+    }
+
+    let mut detail = Map::new();
+    detail.insert("from_uri".into(), json!(from_uri));
+    detail.insert("to_uri".into(), json!(to_uri));
+    local.emit_event(
+        StoreEvent::new("artifact.renamed", device)
+            .with_path(space, to_rel)
+            .with_uri(to_uri)
+            .with_detail(detail),
+    );
+    Ok(())
+}
+
+/// Sync one binding: scan → rename detect → ingest/update → delete.
 pub fn sync_binding(local: &Local, b: &Binding) -> BindingReport {
     let mut report = BindingReport {
         binding_id: b.id.clone(),
@@ -204,7 +326,6 @@ pub fn sync_binding(local: &Local, b: &Binding) -> BindingReport {
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or_default();
-    let mut seen = HashSet::new();
     let ignore_fp = ignore_fingerprint(&b.ignore);
     let prev_ignore = index
         .get(META_KEY)
@@ -216,6 +337,7 @@ pub fn sync_binding(local: &Local, b: &Binding) -> BindingReport {
     let stable_ms = binding_stable_ms();
     let mut truncated = false;
     let mut scanned = 0usize;
+    let mut entries: Vec<ScanEntry> = Vec::new();
 
     walk(
         &ext,
@@ -225,13 +347,13 @@ pub fn sync_binding(local: &Local, b: &Binding) -> BindingReport {
         &mut scanned,
         &mut truncated,
         &mut |rel, full| {
-            seen.insert(rel.to_string());
             let Ok(meta) = fs::metadata(full) else {
                 report.errors.push(format!("{rel}: stat failed"));
                 return;
             };
             let size = meta.len() as i64;
             let mtime = mtime_ms(&meta);
+            let (dev, ino) = file_dev_ino(&meta);
             let same_meta = !force_full
                 && index
                     .get(rel)
@@ -241,56 +363,43 @@ pub fn sync_binding(local: &Local, b: &Binding) -> BindingReport {
                     .unwrap_or(false);
             if same_meta {
                 report.skipped += 1;
+                // Keep identity fresh without hashing.
+                if let Some(prev) = index.get(rel).cloned() {
+                    let mut obj = prev.as_object().cloned().unwrap_or_default();
+                    obj.insert("dev".into(), json!(dev));
+                    obj.insert("ino".into(), json!(ino));
+                    index.insert(rel.to_string(), Value::Object(obj));
+                }
+                entries.push(ScanEntry {
+                    rel: rel.to_string(),
+                    full: full.to_path_buf(),
+                    size,
+                    mtime,
+                    sha: index
+                        .get(rel)
+                        .and_then(|v| v.get("sha"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    dev,
+                    ino,
+                });
                 return;
             }
-            // Half-write guard: require two identical samples before ingest.
             if wait_stable(full, size, mtime, stable_ms).is_none() {
                 report.skipped += 1;
                 return;
             }
             let (sha, _) = super::browse::file_sha(full);
-            let same_content = index
-                .get(rel)
-                .map(|v| v.get("sha") == Some(&json!(sha)) && v.get("size") == Some(&json!(size)))
-                .unwrap_or(false);
-            if same_content {
-                report.skipped += 1;
-                // Refresh mtime cache after ignore force-full.
-                index.insert(
-                    rel.to_string(),
-                    json!({"sha": sha, "size": size, "mtime": mtime}),
-                );
-                return;
-            }
-            let dest_rel = if b.folder.is_empty() {
-                rel.to_string()
-            } else {
-                format!("{}/{}", b.folder, rel)
-            };
-            match ingest_file(
-                local,
-                &b.space,
-                &local.device_id,
-                &dest_rel,
-                full,
+            entries.push(ScanEntry {
+                rel: rel.to_string(),
+                full: full.to_path_buf(),
                 size,
-                &sha,
-                &b.mode,
-            ) {
-                Ok(()) => {
-                    let existed = index.contains_key(rel);
-                    index.insert(
-                        rel.to_string(),
-                        json!({"sha": sha, "size": size, "mtime": mtime}),
-                    );
-                    if existed {
-                        report.updated += 1;
-                    } else {
-                        report.added += 1;
-                    }
-                }
-                Err(e) => report.errors.push(format!("{rel}: {e}")),
-            }
+                mtime,
+                sha,
+                dev,
+                ino,
+            });
         },
     );
     report.scanned = scanned;
@@ -300,21 +409,108 @@ pub fn sync_binding(local: &Local, b: &Binding) -> BindingReport {
             .errors
             .push(format!("file_limit_exceeded: max_files={max_files}"));
     }
-    index.insert(
-        META_KEY.into(),
-        json!({"ignore": ignore_fp}),
-    );
+
+    let seen: HashSet<String> = entries.iter().map(|e| e.rel.clone()).collect();
+    let vanished: Vec<String> = index
+        .keys()
+        .filter(|k| k.as_str() != META_KEY && !seen.contains(k.as_str()))
+        .cloned()
+        .collect();
+    let mut appeared: Vec<&ScanEntry> = entries
+        .iter()
+        .filter(|e| !index.contains_key(&e.rel))
+        .collect();
+    let mut renamed_from: HashSet<String> = HashSet::new();
+    let mut renamed_to: HashSet<String> = HashSet::new();
+
+    for from_rel in &vanished {
+        let prev = match index.get(from_rel) {
+            Some(v) => v,
+            None => continue,
+        };
+        let prev_sha = prev.get("sha").and_then(|v| v.as_str()).unwrap_or("");
+        let prev_dev = prev.get("dev").and_then(|v| v.as_u64()).unwrap_or(0);
+        let prev_ino = prev.get("ino").and_then(|v| v.as_u64()).unwrap_or(0);
+        let match_idx = appeared.iter().position(|a| {
+            if renamed_to.contains(&a.rel) {
+                return false;
+            }
+            if prev_dev != 0 && prev_ino != 0 && a.dev == prev_dev && a.ino == prev_ino {
+                return true;
+            }
+            !prev_sha.is_empty() && a.sha == prev_sha
+        });
+        let Some(i) = match_idx else {
+            continue;
+        };
+        let to = appeared.remove(i);
+        let from_dest = binding_dest_rel(b, from_rel);
+        let to_dest = binding_dest_rel(b, &to.rel);
+        match rename_bound_path(local, &b.space, &from_dest, &to_dest) {
+            Ok(()) => {
+                index.remove(from_rel);
+                index.insert(to.rel.clone(), index_entry_json(to));
+                renamed_from.insert(from_rel.clone());
+                renamed_to.insert(to.rel.clone());
+                report.renamed += 1;
+            }
+            Err(e) => report.errors.push(format!("rename {from_rel}->{}: {e}", to.rel)),
+        }
+    }
+
+    for e in &entries {
+        if renamed_to.contains(&e.rel) {
+            continue;
+        }
+        if e.sha.is_empty() {
+            // Unchanged meta-skip path already counted as skipped.
+            continue;
+        }
+        let same_content = index
+            .get(&e.rel)
+            .map(|v| {
+                v.get("sha") == Some(&json!(e.sha)) && v.get("size") == Some(&json!(e.size))
+            })
+            .unwrap_or(false);
+        if same_content {
+            index.insert(e.rel.clone(), index_entry_json(e));
+            if !force_full {
+                // already counted skipped when meta matched; if content-only refresh:
+            }
+            continue;
+        }
+        let dest_rel = binding_dest_rel(b, &e.rel);
+        match ingest_file(
+            local,
+            &b.space,
+            &local.device_id,
+            &dest_rel,
+            &e.full,
+            e.size,
+            &e.sha,
+            &b.mode,
+        ) {
+            Ok(()) => {
+                let existed = index.contains_key(&e.rel);
+                index.insert(e.rel.clone(), index_entry_json(e));
+                if existed {
+                    report.updated += 1;
+                } else {
+                    report.added += 1;
+                }
+            }
+            Err(err) => report.errors.push(format!("{}: {err}", e.rel)),
+        }
+    }
+
+    index.insert(META_KEY.into(), json!({"ignore": ignore_fp}));
 
     let rels: Vec<String> = index.keys().cloned().collect();
     for rel in rels {
-        if rel == META_KEY || seen.contains(&rel) {
+        if rel == META_KEY || seen.contains(&rel) || renamed_from.contains(&rel) {
             continue;
         }
-        let dest_rel = if b.folder.is_empty() {
-            rel.clone()
-        } else {
-            format!("{}/{}", b.folder, rel)
-        };
+        let dest_rel = binding_dest_rel(b, &rel);
         let mut p = Map::new();
         p.insert("space".into(), json!(b.space));
         p.insert("path".into(), json!(dest_rel));
@@ -655,6 +851,40 @@ mod tests {
         assert_eq!(r4.deleted, 1);
         assert!(!store_file(dir.path(), "inbox/a.txt").exists());
         assert!(dir.path().join(".recycle").is_dir());
+    }
+
+    #[test]
+    fn binding_rename_preserves_store_path_history() {
+        std::env::set_var("NEXUSPOUCH_BINDING_STABLE_MS", "0");
+        let dir = tempdir().unwrap();
+        let local = make_local(dir.path());
+        let ext = tempdir().unwrap();
+        let registry = BindingsRegistry::open(dir.path());
+        let b = registry
+            .add(
+                "mv",
+                ext.path().to_str().unwrap(),
+                "files",
+                "mv",
+                "copy",
+                vec![],
+            )
+            .unwrap();
+        fs::write(ext.path().join("a.txt"), b"hello-rename").unwrap();
+        let r1 = sync_binding(&local, &b);
+        assert_eq!(r1.added, 1);
+        assert!(store_file(dir.path(), "mv/a.txt").exists());
+
+        fs::rename(ext.path().join("a.txt"), ext.path().join("b.txt")).unwrap();
+        let r2 = sync_binding(&local, &b);
+        assert_eq!(r2.renamed, 1, "errors={:?}", r2.errors);
+        assert_eq!(r2.added, 0);
+        assert_eq!(r2.deleted, 0);
+        assert!(!store_file(dir.path(), "mv/a.txt").exists());
+        assert_eq!(
+            fs::read_to_string(store_file(dir.path(), "mv/b.txt")).unwrap(),
+            "hello-rename"
+        );
     }
 
     #[test]

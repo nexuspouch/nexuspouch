@@ -1,6 +1,7 @@
 # Agent 会话历史管理设计（Session History）
 
-> 状态：设计稿 v0.1（2026-08-02）
+> 状态：P1 骨架已落地（2026-08-02）——`sessions` well-known 空间 + 索引 strict
+> 清洗 + `--bind` 到 sessions；格式适配器 / debounce / session_recall 仍待 P2+。
 > 定位：把各 agent 的会话历史纳入 Nexuspouch 管理——跨设备备份、版本化、
 > 全文与语义召回。会话历史是记忆层的最大数据源，与
 > [VECTOR_SEARCH_DESIGN.md](VECTOR_SEARCH_DESIGN.md) 直接衔接。

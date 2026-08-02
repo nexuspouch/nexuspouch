@@ -12,6 +12,7 @@ pub mod master;
 pub mod migrate_seed;
 pub mod reprotect;
 pub mod retention;
+pub mod sanitize;
 pub mod snapshot_crypto;
 pub mod spaces;
 pub mod rrf;
@@ -96,7 +97,14 @@ impl Local {
         }
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(&root).map_err(io_err)?;
-        for sp in ["artifacts", "files", "attachments", "backups", spaces::MEMORY_SPACE] {
+        for sp in [
+            "artifacts",
+            "files",
+            "attachments",
+            "backups",
+            spaces::MEMORY_SPACE,
+            spaces::SESSIONS_SPACE,
+        ] {
             std::fs::create_dir_all(root.join(device_id).join(sp)).map_err(io_err)?;
         }
         std::fs::create_dir_all(root.join(".recycle")).map_err(io_err)?;
@@ -116,8 +124,9 @@ impl Local {
             spaces: spaces::SpaceRegistry::open(&root),
             audit: AuditLog::open(&root),
         };
-        // Well-known memory space for distilled agent recall (vector P2).
+        // Well-known spaces: memory (vector P2) + sessions (session history P1).
         let _ = local.spaces.ensure_memory();
+        let _ = local.spaces.ensure_sessions();
         let stale = local.vector.stale_count();
         if stale > 0 {
             tracing::warn!(
@@ -360,8 +369,20 @@ impl Local {
     }
 
     pub fn index_file(&self, e: &index::IndexEntry) {
-        self.index.index_file(e);
-        // Vector side: prefer summary + body text already on the index entry.
+        // Session transcripts: scrub before FTS/vector; raw file on disk unchanged.
+        let mut e = e.clone();
+        if e.space == spaces::SESSIONS_SPACE {
+            let mode = std::env::var("NEXUSPOUCH_SESSIONS_SCRUB")
+                .unwrap_or_else(|_| "strict".into())
+                .to_lowercase();
+            if mode != "full" && mode != "off" {
+                e.body = sanitize::scrub_strict(&e.body);
+                if let Some(sum) = e.summary.take() {
+                    e.summary = Some(sanitize::scrub_strict(&sum));
+                }
+            }
+        }
+        self.index.index_file(&e);
         let text = format!(
             "{} {}",
             e.summary.as_deref().unwrap_or(""),

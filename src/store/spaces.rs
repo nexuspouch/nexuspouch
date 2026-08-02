@@ -17,6 +17,9 @@ pub const BUILTIN_SPACES: [&str; 4] = ["artifacts", "files", "attachments", "bac
 /// Well-known custom space for distilled agent memory (vector search P2).
 pub const MEMORY_SPACE: &str = "memory";
 
+/// Well-known custom space for agent session transcripts (SESSION_HISTORY P1).
+pub const SESSIONS_SPACE: &str = "sessions";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpaceProfile {
     pub name: String,
@@ -130,6 +133,15 @@ impl SpaceRegistry {
         self.declare(MEMORY_SPACE, "private", "client", "keep_last", "denied")
     }
 
+    /// Seed well-known `sessions` space (SESSION_HISTORY_DESIGN P1).
+    /// Default: private, client encryption, keep_last, import allowed (device migrate).
+    pub fn ensure_sessions(&self) -> Result<SpaceProfile, String> {
+        if let Some(p) = self.get(SESSIONS_SPACE) {
+            return Ok(p);
+        }
+        self.declare(SESSIONS_SPACE, "private", "client", "keep_last", "allowed")
+    }
+
     /// Visibility for ACL: `Some(shared?)` for known spaces, `None` unknown.
     pub fn visibility(&self, name: &str) -> Option<bool> {
         match name {
@@ -173,7 +185,21 @@ impl SpaceRegistry {
                 );
                 row.as_object_mut().unwrap().insert(
                     "convention".into(),
-                    json!("<device>/memory/<topic>/<ts>.md"),
+                    json!("store://memory/<device>/<topic>/<ts>.md"),
+                );
+            }
+            if s.name == SESSIONS_SPACE {
+                row.as_object_mut().unwrap().insert(
+                    "well_known".into(),
+                    json!(true),
+                );
+                row.as_object_mut().unwrap().insert(
+                    "convention".into(),
+                    json!("store://sessions/<device>/<agent>/<session>.jsonl"),
+                );
+                row.as_object_mut().unwrap().insert(
+                    "index_scrub".into(),
+                    json!("strict"),
                 );
             }
             out.push(row);
@@ -266,5 +292,26 @@ mod tests {
             .clone();
         assert_eq!(mem["well_known"], true);
         assert!(mem["convention"].as_str().unwrap().contains("<topic>"));
+    }
+
+    #[test]
+    fn ensure_sessions_seeds_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = SpaceRegistry::open(dir.path());
+        let p1 = reg.ensure_sessions().unwrap();
+        assert_eq!(p1.name, SESSIONS_SPACE);
+        assert_eq!(p1.import_grant, "allowed");
+        let p2 = reg.ensure_sessions().unwrap();
+        assert_eq!(p1.created_ms, p2.created_ms);
+        let row = reg
+            .list_json()
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == SESSIONS_SPACE)
+            .cloned()
+            .unwrap();
+        assert_eq!(row["well_known"], true);
+        assert_eq!(row["index_scrub"], "strict");
     }
 }

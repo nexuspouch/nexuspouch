@@ -15,9 +15,9 @@
 
 | 项 | 状态 | 依赖 |
 |----|------|------|
-| App 侧事件驱动 watcher（当前 Dart 端为轮询 `startPeriodic`；Rust 端 notify 已落地） | 待实现 | `watcher` 包（新依赖）或轮询保留 |
-| 绑定 UI 目录选择器（当前手输路径，可换 file_selector 原生选目录） | 待实现 | 新依赖 + 平台权限 |
-| rename/move 识别（保留版本历史；当前 delete+add） | 待实现 | Rust 用 inode；Dart 缺 inode 需 FFI 或 hash+path 双信号 |
+| App 侧事件驱动 watcher（当前 Dart 端为轮询 `startPeriodic`；Rust 端 notify 已落地） | ✅ | `watcher` + `startAutoSync`（去抖）+ 周期兜底 |
+| 绑定 UI 目录选择器（当前手输路径，可换 file_selector 原生选目录） | ✅ | `FilePicker.getDirectoryPath` |
+| rename/move 识别（保留版本历史；当前 delete+add） | ✅（Rust inode/sha；Dart 仍 delete+add） | bindings.rs `artifact.renamed` |
 | 半写保护（文件连续两次采样一致才摄取） | ✅ | `NEXUSPOUCH_BINDING_STABLE_MS`（默认 300） |
 | 忽略规则变更触发全量对账 | ✅ | index `__meta__.ignore` fingerprint |
 | 扫描限速 + 单绑定文件上限（默认 50 万，可配） | ✅ | `NEXUSPOUCH_BINDING_MAX_FILES` |
@@ -42,16 +42,16 @@
 
 | 项 | 状态 | 依赖 |
 |----|------|------|
-| acp-proxy 网关工具管线正式注入 store 工具（`store-tools.ts` 已就绪） | 待实现 | ACP SDK 工具注入挂点 |
+| acp-proxy 网关工具管线正式注入 store 工具（`store-tools.ts` 已就绪） | ✅ | `NEXUSPOUCH_ROOT` → session MCP stdio 注入 |
 | MCP `store_write` 透传 `context` / `to_agent` 走 handoff（M3 语义） | ✅ | Nexuspouch MCP + agent-bridge store-tools |
-| MCP `store://` 资源订阅（subscribe） | 待实现（低优先） | MCP 协议 |
+| MCP `store://` 资源订阅（subscribe） | 预留（低优先；现用 `store_watch`） | MCP 协议 |
 
 ## E. 协议 / 双端实现缺口
 
 | 项 | 状态 | 依赖 |
 |----|------|------|
 | Dart master 侧服务端：App 自己当 master（loopback）时 versions / handoff / 自定义空间的服务端逻辑 | **已决策（2026-08-02）：不实现**。master 服务端能力只归 Nexuspouch；PC 单独安装服务；ShePaw App 仅做客户端。手机作 master 时增强能力（版本/交接/自定义空间/语义检索）按降级语义不可用，协议客户端能力保留 | 无 |
-| Windows 平台支持（README 限定 macOS/Linux） | 待决策（建议暂不支持，明确非目标） | 平台适配 |
+| Windows 节点支持（闲置 PC 当 master；README 限定 macOS/Linux） | **已决策（2026-08-02）：支持**，方案见 WINDOWS_SUPPORT.md；W1 基础可用 → W2 完整特性 → W3 打磨 | 平台适配 + CI Windows runner |
 | versions 保留策略管理页 / 发布产物可视化 | 待实现（低优先） | M2 |
 
 ## F. 运维 / QA
@@ -84,8 +84,8 @@
 
 | 项 | 状态 | 依赖 |
 |----|------|------|
-| P1：`sessions` 空间 + 格式适配层 + 文件级摄取（复用 M6 绑定）+ FTS5 全文 + 敏感清洗（strict 默认） | 待实现 | 设计文档 SESSION_HISTORY_DESIGN.md |
-| P2：会话语义召回（分块 embedding + `session_recall` MCP） | 待实现 | H 向量搜索 P1 |
+| P1：`sessions` 空间 + 格式适配层 + 文件级摄取（复用 M6 绑定）+ FTS5 全文 + 敏感清洗（strict 默认） | ✅ 骨架（空间+strict 清洗+bind；适配器/debounce 待增强） | SESSION_HISTORY_DESIGN.md |
+| P2：会话语义召回（分块 embedding + `session_recall` MCP） | ✅ 薄层（`session_recall`→sessions hybrid；分块策略可增强） | H 向量 + sessions 空间 |
 | P3：agent-bridge 网关 transcript 实时旁路捕获 | 待实现 | agent-bridge 挂点 |
 
 设计要点：会话历史是记忆层最大数据源；`sessions` 空间默认 private +
@@ -98,5 +98,5 @@
 | P0（尽快） | F：真机 QA（vitest 已缓解） | 收尾稳定性，避免环境债 |
 | P1（产品价值） | C：App 消费 UI（版本/搜索/交接通知） | 让 M2-M5 能力对用户可见 |
 | P2（完整性） | B、D：绑定增强、MCP handoff 透传 | 完善 M6 与生态入口 |
-| P3（需决策） | E：Dart master 服务端、Windows | 架构取舍，先讨论再投入 |
+| P3（已决策） | E：Dart master 不做；Windows 见 WINDOWS_SUPPORT.md | — |
 | P4（不承诺） | A、G：空间配额、快照薄层 | 预留，等真实需求 |

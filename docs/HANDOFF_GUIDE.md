@@ -33,7 +33,7 @@
 | B M6 绑定增强（rename/半写/上限/原生 reflink） | M6_FOLDER_BINDING.md §3-§6、§13 | 核心已落地，增强项 |
 | C ShePaw App 消费 UI（版本/交接通知/搜索/agents） | [APP_CONSUMER_UI.md](APP_CONSUMER_UI.md) + spec §2.11 + shepaw 现有实现 | 最小设计已补；实现按该文档切片 |
 | D agent-bridge/MCP（网关注入/handoff 透传/订阅） | agent-bridge 仓库 README + examples/mcp + store-tools.ts + AGENTS.md | 跨仓库 |
-| E 双端缺口（Dart master 服务端、Windows） | spec v4.3 + SPACE_BOUNDARY_DESIGN.md | Dart master 服务端已决策**不实现**（master 能力归 Nexuspouch，App 仅客户端，手机 master 降级）；Windows 待决策 |
+| E 双端缺口（Dart master 服务端、Windows） | spec v4.3 + SPACE_BOUNDARY_DESIGN.md + WINDOWS_SUPPORT.md | Dart master 服务端已决策**不实现**（master 能力归 Nexuspouch，App 仅客户端，手机 master 降级）；Windows **已决策支持**（W1-W3） |
 | F 运维/QA（真机、vitest Node24） | QA_BASELINE.md + DEVICE_TESTING.md；vitest 在 agent-bridge 仓库 | 真机需硬件 |
 | G 快照管理薄层 | **未成文，先补设计**（建议并入 SPACE_BOUNDARY_DESIGN 或独立文档） | 只有讨论记录 |
 | H 向量搜索 P1-P3 | VECTOR_SEARCH_DESIGN.md（已定稿） | 按里程碑推进 |
@@ -97,9 +97,9 @@
 
 1. **P0（收尾）**：F——vitest 已缓解（钉 Node 20）；真机 QA 仍待执行；
 2. **P1（产品价值）**：C——App 消费 UI 已落地（设计 + search/events 帧 + Browser/通知）；
-3. **P2（完整性）**：B 半写/上限/ignore 对账与 D MCP handoff 透传已落地；
-   余 rename/FFI/App watcher、网关注入仍待；
-4. **P3（需决策）**：E——Dart master 服务端、Windows；
-5. **P4（不承诺）**：A、G——空间配额、快照薄层（先讨论后投入）；
-6. **新方向**：H——P1–P3 在 `codex/vector-p1`（ONNX 默认 + RRF hybrid +
-   `memory` + index-rebuild 重嵌入；HNSW 暂缓）。
+3. **P2（完整性）**：B（watcher/选择器/Rust rename）与 D（网关 MCP 注入）已落地；
+   clonefile FFI / MCP subscribe / Dart rename 仍可选；
+4. **P3**：E——Dart master 不做；Windows 见 WINDOWS_SUPPORT.md（已决策支持）；
+5. **P4（不承诺）**：A、G——空间配额、快照薄层；
+6. **H 向量**：P1–P3 完成；**I 会话**：P1 骨架完成，P2/P3 待做；
+7. **最后**：F 真机 QA 手工清单。

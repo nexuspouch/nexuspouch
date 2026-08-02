@@ -258,6 +258,18 @@ impl McpServer {
                     }
                 },
                 {
+                    "name": "session_recall",
+                    "description": "Semantic recall over agent session transcripts (space=sessions, hybrid RRF).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "q": {"type": "string"},
+                            "limit": {"type": "integer", "default": 20}
+                        },
+                        "required": ["q"]
+                    }
+                },
+                {
                     "name": "store_space",
                     "description": "Report space usage: per-device/space bytes, staging, recycle, volume free/warn.",
                     "inputSchema": {"type": "object", "properties": {}}
@@ -280,6 +292,7 @@ impl McpServer {
             "store_list" => self.store_list(&args),
             "store_search" => self.store_search(&args),
             "store_watch" => self.store_watch(&args),
+            "session_recall" => self.session_recall(&args),
             "store_space" => self.store_space(&args),
             _ => return Err(invalid_params(format!("unknown tool: {name}"))),
         };
@@ -503,6 +516,19 @@ impl McpServer {
         Ok(out)
     }
 
+    fn session_recall(&self, args: &Value) -> Result<Value, RpcError> {
+        let q = str_arg(args, "q")?;
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20) as usize;
+        let out = self
+            .client
+            .search_ex(q, Some("sessions"), None, None, limit, true)
+            .map_err(map_store_err)?;
+        Ok(out)
+    }
+
     fn store_watch(&self, args: &Value) -> Result<Value, RpcError> {
         let prefix = str_arg_opt(args, "prefix");
         let out = self.client.recent_events(100).map_err(map_store_err)?;
@@ -665,7 +691,7 @@ mod tests {
 
         let list = rpc(&server, 2, "tools/list", json!({}));
         let tools = list["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 9);
         let names: Vec<&str> = tools
             .iter()
             .map(|t| t["name"].as_str().unwrap())
