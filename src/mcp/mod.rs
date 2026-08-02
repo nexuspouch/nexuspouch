@@ -178,7 +178,9 @@ impl McpServer {
                             "filename": {"type": "string", "description": "Relative path (no leading /, no ..)"},
                             "content": {"type": "string"},
                             "space": {"type": "string", "enum": ["artifacts", "files", "attachments", "backups"], "default": "artifacts"},
-                            "task": {"type": "string", "description": "Optional task folder prefix"}
+                            "task": {"type": "string", "description": "Optional task folder prefix"},
+                            "context": {"type": "string", "description": "If set (or to_agent), commit via handoff.create (M3)"},
+                            "to_agent": {"type": "string", "description": "Optional handoff recipient agent id"}
                         },
                         "required": ["filename", "content"]
                     }
@@ -351,13 +353,48 @@ impl McpServer {
             offset = end;
         }
 
+        let context = args
+            .get("context")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let to_agent = args
+            .get("to_agent")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let uri = format!("store://{space}/{}/{}", self.device, path);
+
+        if context.is_some() || to_agent.is_some() {
+            let mut handoff = Map::new();
+            handoff.insert("space".into(), json!(space));
+            handoff.insert("upload_ids".into(), json!([upload_id]));
+            if let Some(c) = context {
+                handoff.insert("context".into(), json!(c));
+            }
+            if let Some(a) = to_agent {
+                handoff.insert("to_agent".into(), json!(a));
+            }
+            let result = self
+                .client
+                .store_op("handoff.create", handoff)
+                .map_err(map_store_err)?;
+            return Ok(json!({
+                "uri": result.get("handoff_uri").cloned().unwrap_or(json!(uri)),
+                "space": space,
+                "path": path,
+                "size": size,
+                "sha256": sha,
+                "state": result.get("state").cloned().unwrap_or(json!("published")),
+                "handoff": result,
+            }));
+        }
+
         let mut commit = Map::new();
         commit.insert("space".into(), json!(space));
         commit.insert("upload_ids".into(), json!([upload_id]));
         let committed = self.client.store_op("commit", commit).map_err(map_store_err)?;
 
         Ok(json!({
-            "uri": format!("store://{space}/{}/{}", self.device, path),
+            "uri": uri,
             "space": space,
             "path": path,
             "size": size,

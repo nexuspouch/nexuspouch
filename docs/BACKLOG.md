@@ -18,9 +18,9 @@
 | App 侧事件驱动 watcher（当前 Dart 端为轮询 `startPeriodic`；Rust 端 notify 已落地） | 待实现 | `watcher` 包（新依赖）或轮询保留 |
 | 绑定 UI 目录选择器（当前手输路径，可换 file_selector 原生选目录） | 待实现 | 新依赖 + 平台权限 |
 | rename/move 识别（保留版本历史；当前 delete+add） | 待实现 | Rust 用 inode；Dart 缺 inode 需 FFI 或 hash+path 双信号 |
-| 半写保护（文件连续两次采样一致才摄取） | 待实现 | 无 |
-| 忽略规则变更触发全量对账 | 待实现 | 无 |
-| 扫描限速 + 单绑定文件上限（默认 50 万，可配） | 待实现 | 无 |
+| 半写保护（文件连续两次采样一致才摄取） | ✅ | `NEXUSPOUCH_BINDING_STABLE_MS`（默认 300） |
+| 忽略规则变更触发全量对账 | ✅ | index `__meta__.ignore` fingerprint |
+| 扫描限速 + 单绑定文件上限（默认 50 万，可配） | ✅ | `NEXUSPOUCH_BINDING_MAX_FILES` |
 | Rust 原生 `clonefile` / `FICLONERANGE` FFI（当前 `cp -c` / `cp --reflink=auto`，行为等价但多一次进程调用） | 待实现（可选优化） | 平台 FFI |
 
 ## C. ShePaw App 消费层（协议已就绪，UI 未做）
@@ -43,7 +43,7 @@
 | 项 | 状态 | 依赖 |
 |----|------|------|
 | acp-proxy 网关工具管线正式注入 store 工具（`store-tools.ts` 已就绪） | 待实现 | ACP SDK 工具注入挂点 |
-| MCP `store_write` 透传 `context` / `to_agent` 走 handoff（M3 语义） | 待实现 | M3 已就绪 |
+| MCP `store_write` 透传 `context` / `to_agent` 走 handoff（M3 语义） | ✅ | Nexuspouch MCP + agent-bridge store-tools |
 | MCP `store://` 资源订阅（subscribe） | 待实现（低优先） | MCP 协议 |
 
 ## E. 协议 / 双端实现缺口

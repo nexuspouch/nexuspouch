@@ -31,6 +31,39 @@ pub struct Binding {
     pub created_ms: i64,
 }
 
+const DEFAULT_MAX_FILES: usize = 500_000;
+const DEFAULT_STABLE_MS: u64 = 300;
+const THROTTLE_EVERY: usize = 1_000;
+const META_KEY: &str = "__meta__";
+
+fn binding_max_files() -> usize {
+    std::env::var("NEXUSPOUCH_BINDING_MAX_FILES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_MAX_FILES)
+}
+
+fn binding_stable_ms() -> u64 {
+    if let Ok(s) = std::env::var("NEXUSPOUCH_BINDING_STABLE_MS") {
+        if let Ok(n) = s.parse() {
+            return n;
+        }
+    }
+    // Unit tests skip the delay by default (set env to exercise the guard).
+    if cfg!(test) {
+        0
+    } else {
+        DEFAULT_STABLE_MS
+    }
+}
+
+fn ignore_fingerprint(ignore: &[String]) -> String {
+    let mut parts = ignore.to_vec();
+    parts.sort();
+    parts.join("\n")
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct BindingReport {
     pub binding_id: String,
@@ -38,6 +71,8 @@ pub struct BindingReport {
     pub updated: usize,
     pub deleted: usize,
     pub skipped: usize,
+    pub scanned: usize,
+    pub truncated: bool,
     pub errors: Vec<String>,
 }
 
@@ -49,6 +84,8 @@ impl BindingReport {
             "updated": self.updated,
             "deleted": self.deleted,
             "skipped": self.skipped,
+            "scanned": self.scanned,
+            "truncated": self.truncated,
             "errors": self.errors,
         })
     }
@@ -168,66 +205,109 @@ pub fn sync_binding(local: &Local, b: &Binding) -> BindingReport {
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or_default();
     let mut seen = HashSet::new();
+    let ignore_fp = ignore_fingerprint(&b.ignore);
+    let prev_ignore = index
+        .get(META_KEY)
+        .and_then(|m| m.get("ignore"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let force_full = prev_ignore != ignore_fp;
+    let max_files = binding_max_files();
+    let stable_ms = binding_stable_ms();
+    let mut truncated = false;
+    let mut scanned = 0usize;
 
-    walk(&ext, &ext, &b.ignore, &mut |rel, full| {
-        seen.insert(rel.to_string());
-        let Ok(meta) = fs::metadata(full) else {
-            report.errors.push(format!("{rel}: stat failed"));
-            return;
-        };
-        let size = meta.len() as i64;
-        let mtime = mtime_ms(&meta);
-        let same_meta = index
-            .get(rel)
-            .map(|v| v.get("size") == Some(&json!(size)) && v.get("mtime") == Some(&json!(mtime)))
-            .unwrap_or(false);
-        if same_meta {
-            report.skipped += 1;
-            return;
-        }
-        let (sha, _) = super::browse::file_sha(full);
-        let same_content = index
-            .get(rel)
-            .map(|v| v.get("sha") == Some(&json!(sha)) && v.get("size") == Some(&json!(size)))
-            .unwrap_or(false);
-        if same_content {
-            report.skipped += 1;
-            return;
-        }
-        let dest_rel = if b.folder.is_empty() {
-            rel.to_string()
-        } else {
-            format!("{}/{}", b.folder, rel)
-        };
-        match ingest_file(
-            local,
-            &b.space,
-            &local.device_id,
-            &dest_rel,
-            full,
-            size,
-            &sha,
-            &b.mode,
-        ) {
-            Ok(()) => {
-                let existed = index.contains_key(rel);
+    walk(
+        &ext,
+        &ext,
+        &b.ignore,
+        max_files,
+        &mut scanned,
+        &mut truncated,
+        &mut |rel, full| {
+            seen.insert(rel.to_string());
+            let Ok(meta) = fs::metadata(full) else {
+                report.errors.push(format!("{rel}: stat failed"));
+                return;
+            };
+            let size = meta.len() as i64;
+            let mtime = mtime_ms(&meta);
+            let same_meta = !force_full
+                && index
+                    .get(rel)
+                    .map(|v| {
+                        v.get("size") == Some(&json!(size)) && v.get("mtime") == Some(&json!(mtime))
+                    })
+                    .unwrap_or(false);
+            if same_meta {
+                report.skipped += 1;
+                return;
+            }
+            // Half-write guard: require two identical samples before ingest.
+            if wait_stable(full, size, mtime, stable_ms).is_none() {
+                report.skipped += 1;
+                return;
+            }
+            let (sha, _) = super::browse::file_sha(full);
+            let same_content = index
+                .get(rel)
+                .map(|v| v.get("sha") == Some(&json!(sha)) && v.get("size") == Some(&json!(size)))
+                .unwrap_or(false);
+            if same_content {
+                report.skipped += 1;
+                // Refresh mtime cache after ignore force-full.
                 index.insert(
                     rel.to_string(),
                     json!({"sha": sha, "size": size, "mtime": mtime}),
                 );
-                if existed {
-                    report.updated += 1;
-                } else {
-                    report.added += 1;
-                }
+                return;
             }
-            Err(e) => report.errors.push(format!("{rel}: {e}")),
-        }
-    });
+            let dest_rel = if b.folder.is_empty() {
+                rel.to_string()
+            } else {
+                format!("{}/{}", b.folder, rel)
+            };
+            match ingest_file(
+                local,
+                &b.space,
+                &local.device_id,
+                &dest_rel,
+                full,
+                size,
+                &sha,
+                &b.mode,
+            ) {
+                Ok(()) => {
+                    let existed = index.contains_key(rel);
+                    index.insert(
+                        rel.to_string(),
+                        json!({"sha": sha, "size": size, "mtime": mtime}),
+                    );
+                    if existed {
+                        report.updated += 1;
+                    } else {
+                        report.added += 1;
+                    }
+                }
+                Err(e) => report.errors.push(format!("{rel}: {e}")),
+            }
+        },
+    );
+    report.scanned = scanned;
+    report.truncated = truncated;
+    if truncated {
+        report
+            .errors
+            .push(format!("file_limit_exceeded: max_files={max_files}"));
+    }
+    index.insert(
+        META_KEY.into(),
+        json!({"ignore": ignore_fp}),
+    );
 
     let rels: Vec<String> = index.keys().cloned().collect();
     for rel in rels {
-        if seen.contains(&rel) {
+        if rel == META_KEY || seen.contains(&rel) {
             continue;
         }
         let dest_rel = if b.folder.is_empty() {
@@ -336,12 +416,21 @@ fn walk(
     root: &Path,
     dir: &Path,
     ignore: &[String],
+    max_files: usize,
+    scanned: &mut usize,
+    truncated: &mut bool,
     f: &mut impl FnMut(&str, &Path),
 ) {
+    if *truncated {
+        return;
+    }
     let Ok(rd) = fs::read_dir(dir) else {
         return;
     };
     for ent in rd.flatten() {
+        if *truncated {
+            return;
+        }
         let name = ent.file_name().to_string_lossy().to_string();
         if name.starts_with('.') || matches_ignore(&name, ignore) {
             continue;
@@ -356,10 +445,34 @@ fn walk(
             .to_string_lossy()
             .to_string();
         if path.is_dir() {
-            walk(root, &path, ignore, f);
+            walk(root, &path, ignore, max_files, scanned, truncated, f);
         } else {
+            if *scanned >= max_files {
+                *truncated = true;
+                return;
+            }
+            *scanned += 1;
+            if *scanned % THROTTLE_EVERY == 0 {
+                std::thread::sleep(Duration::from_millis(1));
+            }
             f(&rel, &path);
         }
+    }
+}
+
+/// Re-stat after a short delay; `None` if the file vanished or is still changing.
+fn wait_stable(path: &Path, size: i64, mtime: i64, stable_ms: u64) -> Option<(i64, i64)> {
+    if stable_ms == 0 {
+        return Some((size, mtime));
+    }
+    std::thread::sleep(Duration::from_millis(stable_ms));
+    let meta = fs::metadata(path).ok()?;
+    let size2 = meta.len() as i64;
+    let mtime2 = mtime_ms(&meta);
+    if size2 == size && mtime2 == mtime {
+        Some((size2, mtime2))
+    } else {
+        None
     }
 }
 
@@ -542,6 +655,62 @@ mod tests {
         assert_eq!(r4.deleted, 1);
         assert!(!store_file(dir.path(), "inbox/a.txt").exists());
         assert!(dir.path().join(".recycle").is_dir());
+    }
+
+    #[test]
+    fn binding_file_limit_truncates() {
+        std::env::set_var("NEXUSPOUCH_BINDING_MAX_FILES", "2");
+        let dir = tempdir().unwrap();
+        let local = make_local(dir.path());
+        let ext = tempdir().unwrap();
+        let registry = BindingsRegistry::open(dir.path());
+        let b = registry
+            .add(
+                "cap",
+                ext.path().to_str().unwrap(),
+                "files",
+                "cap",
+                "copy",
+                vec![],
+            )
+            .unwrap();
+        fs::write(ext.path().join("a.txt"), b"a").unwrap();
+        fs::write(ext.path().join("b.txt"), b"b").unwrap();
+        fs::write(ext.path().join("c.txt"), b"c").unwrap();
+        let r = sync_binding(&local, &b);
+        assert!(r.truncated);
+        assert_eq!(r.scanned, 2);
+        assert!(r.errors.iter().any(|e| e.contains("file_limit_exceeded")));
+        std::env::remove_var("NEXUSPOUCH_BINDING_MAX_FILES");
+    }
+
+    #[test]
+    fn binding_ignore_change_forces_reconcile() {
+        let dir = tempdir().unwrap();
+        let local = make_local(dir.path());
+        let ext = tempdir().unwrap();
+        let registry = BindingsRegistry::open(dir.path());
+        let mut b = registry
+            .add(
+                "ig",
+                ext.path().to_str().unwrap(),
+                "files",
+                "ig",
+                "copy",
+                vec!["*.tmp".into()],
+            )
+            .unwrap();
+        fs::write(ext.path().join("keep.txt"), b"k").unwrap();
+        fs::write(ext.path().join("x.tmp"), b"tmp").unwrap();
+        let r1 = sync_binding(&local, &b);
+        assert_eq!(r1.added, 1);
+        assert!(!store_file(dir.path(), "ig/x.tmp").exists());
+
+        // Drop ignore → previously skipped file is ingested on full reconcile.
+        b.ignore.clear();
+        let r2 = sync_binding(&local, &b);
+        assert_eq!(r2.added, 1);
+        assert!(store_file(dir.path(), "ig/x.tmp").exists());
     }
 
     #[test]

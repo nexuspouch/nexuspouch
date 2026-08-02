@@ -17,8 +17,6 @@ pub struct StoreUri {
     pub ref_kind: RefKind,
 }
 
-const SPACES: &[&str] = &["artifacts", "files", "attachments", "backups"];
-
 /// Syntactic space-name check: `^[a-z][a-z0-9-]{0,31}$` (custom spaces
 /// declared via `space.declare` must match; built-ins trivially do).
 fn syntactically_valid_space(s: &str) -> bool {

@@ -96,7 +96,8 @@
 
 1. **P0（收尾）**：F——vitest 已缓解（钉 Node 20）；真机 QA 仍待执行；
 2. **P1（产品价值）**：C——App 消费 UI 已落地（设计 + search/events 帧 + Browser/通知）；
-3. **P2（完整性）**：B、D——绑定增强与 MCP handoff 透传（下一项）；
+3. **P2（完整性）**：B 半写/上限/ignore 对账与 D MCP handoff 透传已落地；
+   余 rename/FFI/App watcher、网关注入仍待；
 4. **P3（需决策）**：E——Dart master 服务端、Windows；
 5. **P4（不承诺）**：A、G——空间配额、快照薄层（先讨论后投入）；
 6. **新方向**：H——向量搜索按 VECTOR_SEARCH_DESIGN.md 的 P1-P3 推进。
