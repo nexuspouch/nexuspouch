@@ -2,7 +2,7 @@ use crate::admin::auth::{self, AuthConfig};
 use crate::agents::AgentRegistry;
 use crate::events::{EventBus, StoreEvent};
 use crate::protocol::{self, Frame};
-use crate::store::{Local, OpError, MAX_CHUNK};
+use crate::store::{Local, OpError, SearchFilter, MAX_CHUNK};
 use crate::uri::{self, RefKind, StoreUri};
 use axum::{
     body::Body,
@@ -297,6 +297,10 @@ struct SearchQuery {
     limit: usize,
     #[serde(default)]
     semantic: bool,
+    agent: Option<String>,
+    project: Option<String>,
+    since_ms: Option<i64>,
+    until_ms: Option<i64>,
 }
 
 fn default_search_limit() -> usize {
@@ -322,6 +326,13 @@ async fn search_uri(
     ) {
         return resp;
     }
+    let filter = SearchFilter {
+        agent: q.agent.filter(|s| !s.is_empty()),
+        project: q.project.filter(|s| !s.is_empty()),
+        since_ms: q.since_ms,
+        until_ms: q.until_ms,
+    };
+    let filter = (!filter.is_empty()).then_some(filter);
     match state.store.search_query(
         &q.q,
         q.space.as_deref(),
@@ -329,6 +340,7 @@ async fn search_uri(
         q.state.as_deref(),
         q.limit,
         q.semantic,
+        filter.as_ref(),
     ) {
         Ok(out) => Json(Value::Object(out)).into_response(),
         Err(e) => op_error(e),

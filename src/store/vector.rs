@@ -133,12 +133,15 @@ impl VectorIndex {
     }
 
     /// Brute-force cosine over stored vectors. Returns JSON hit objects with score.
+    /// `filter` applies the agent/project path rule via URI matching; time
+    /// ranges need files.mtime and are applied by the caller (Local).
     pub fn search(
         &self,
         q: &str,
         space: Option<&str>,
         device: Option<&str>,
         limit: usize,
+        filter: Option<&super::SearchFilter>,
     ) -> Result<Vec<Value>, String> {
         if !self.embedder.available() {
             return Err("vector_unavailable".into());
@@ -176,6 +179,12 @@ impl VectorIndex {
                 // store://space/device/...
                 let parts: Vec<&str> = uri.trim_start_matches("store://").split('/').collect();
                 if parts.get(1).copied() != Some(dev) {
+                    continue;
+                }
+            }
+            if let Some(f) = filter {
+                let (_, _, p) = split_uri(&uri);
+                if !f.path_match(&p) {
                     continue;
                 }
             }
@@ -263,10 +272,36 @@ mod tests {
             "cats and dogs playing in the garden",
         );
         let hits = idx
-            .search("revenue growth report", Some("artifacts"), None, 5)
+            .search("revenue growth report", Some("artifacts"), None, 5, None)
             .unwrap();
         assert!(!hits.is_empty());
         assert_eq!(hits[0]["path"], "t/a.md");
         assert_eq!(hits[0]["score_type"], "vector");
+    }
+
+    #[test]
+    fn search_filter_agent_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let emb: Arc<dyn Embedder> = Arc::new(HashingEmbedder {
+            dims: HashingEmbedder::DEFAULT_DIMS,
+        });
+        let idx = VectorIndex::open(dir.path(), emb);
+        idx.upsert_text(
+            "store://sessions/aaaaaaaaaaaaaaaa/claude-code/proj-a/s1.jsonl",
+            "deploy rollback runbook notes",
+        );
+        idx.upsert_text(
+            "store://sessions/aaaaaaaaaaaaaaaa/codex/proj-b/s2.jsonl",
+            "deploy rollback runbook notes",
+        );
+        let f = super::super::SearchFilter {
+            agent: Some("codex".into()),
+            ..Default::default()
+        };
+        let hits = idx
+            .search("deploy runbook", Some("sessions"), None, 5, Some(&f))
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["path"], "codex/proj-b/s2.jsonl");
     }
 }

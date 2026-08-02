@@ -328,14 +328,18 @@ impl McpServer {
                 },
                 {
                     "name": "store_search",
-                    "description": "Search artifacts/files (FTS5 keyword; semantic=true runs FTS5+vector RRF hybrid, degrades to keyword if vectors unavailable).",
+                    "description": "Search artifacts/files (FTS5 keyword; semantic=true runs FTS5+vector RRF hybrid, degrades to keyword if vectors unavailable). Optional filters: agent/project (sessions path prefix) and since_ms/until_ms (mtime range).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "q": {"type": "string"},
                             "space": {"type": "string"},
                             "limit": {"type": "integer", "default": 50},
-                            "semantic": {"type": "boolean", "default": false}
+                            "semantic": {"type": "boolean", "default": false},
+                            "agent": {"type": "string"},
+                            "project": {"type": "string"},
+                            "since_ms": {"type": "integer"},
+                            "until_ms": {"type": "integer"}
                         },
                         "required": ["q"]
                     }
@@ -353,12 +357,16 @@ impl McpServer {
                 },
                 {
                     "name": "session_recall",
-                    "description": "Semantic recall over agent session transcripts (space=sessions, hybrid RRF).",
+                    "description": "Semantic recall over agent session transcripts (space=sessions, hybrid RRF). Optional filters: agent/project (path prefix) and since_ms/until_ms (mtime range).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "q": {"type": "string"},
-                            "limit": {"type": "integer", "default": 20}
+                            "limit": {"type": "integer", "default": 20},
+                            "agent": {"type": "string"},
+                            "project": {"type": "string"},
+                            "since_ms": {"type": "integer"},
+                            "until_ms": {"type": "integer"}
                         },
                         "required": ["q"]
                     }
@@ -607,9 +615,10 @@ impl McpServer {
             .get("semantic")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let filter = search_filter_arg(args);
         let out = self
             .client
-            .search_ex(q, space, None, None, limit, semantic)
+            .search_ex(q, space, None, None, limit, semantic, filter.as_ref())
             .map_err(map_store_err)?;
         Ok(out)
     }
@@ -620,9 +629,10 @@ impl McpServer {
             .get("limit")
             .and_then(|v| v.as_u64())
             .unwrap_or(20) as usize;
+        let filter = search_filter_arg(args);
         let out = self
             .client
-            .search_ex(q, Some("sessions"), None, None, limit, true)
+            .search_ex(q, Some("sessions"), None, None, limit, true, filter.as_ref())
             .map_err(map_store_err)?;
         Ok(out)
     }
@@ -685,6 +695,17 @@ fn str_arg_opt<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key)
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
+}
+
+/// Optional recall filters shared by store_search / session_recall (R1).
+fn search_filter_arg(args: &Value) -> Option<crate::store::SearchFilter> {
+    let f = crate::store::SearchFilter {
+        agent: str_arg_opt(args, "agent").map(str::to_string),
+        project: str_arg_opt(args, "project").map(str::to_string),
+        since_ms: args.get("since_ms").and_then(|v| v.as_i64()),
+        until_ms: args.get("until_ms").and_then(|v| v.as_i64()),
+    };
+    (!f.is_empty()).then_some(f)
 }
 
 /// Run the stdio MCP server until stdin closes.

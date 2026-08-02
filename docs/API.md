@@ -67,7 +67,7 @@ Base: `/api/v1`
 | GET | `/versions?uri=` | List versions of a file (`v`, `sha256`, `size`, `mtime`, `protected`) |
 | GET | `/manifest?uri=` | Read task lineage manifest (producer / parent_uris / files / state) |
 | GET | `/artifact/state?uri=` | Artifact state + lineage (`committed/published/acked/superseded`) |
-| GET | `/search?q=&space=&device=&state=&limit=` | Full-text search (FTS5; phrase match, snippet + score) |
+| GET | `/search?q=&space=&device=&state=&limit=&semantic=&agent=&project=&since_ms=&until_ms=` | Full-text search (FTS5; phrase match, snippet + score). `semantic=true` → FTS5+vector RRF hybrid. Optional recall filters (R1): `agent`/`project` (sessions path prefix) and `since_ms`/`until_ms` (mtime range) |
 | POST | `/store` | Store frame API (`{"op","payload"}`) |
 | GET | `/events` | SSE stream (`event: snapshot` then `event: store`) |
 | GET | `/events/recent` | Last N events as JSON |

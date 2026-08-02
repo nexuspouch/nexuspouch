@@ -98,7 +98,7 @@
 
 | 项 | 状态 | 依赖 |
 |----|------|------|
-| R1：检索评估集（共享 fixture）+ `recall eval` + Recall@K/MRR/nDCG + 召回参数化 | 待实现 | 设计文档 RECALL_ACCURACY_DESIGN.md |
+| R1：检索评估集（共享 fixture）+ `recall eval` + Recall@K/MRR/nDCG + 召回参数化 | ✅（`docs/storage_fixtures/recall_eval.json`：16 会话/36 查询；`nexuspouch recall eval [--fixture][--k][--semantic\|--keyword][--json][--min-recall]`；指标+过滤器在 `store::recall_eval`/`SearchFilter`；agent/project/since_ms/until_ms 透出 HTTP/store 帧/MCP；`NEXUSPOUCH_RRF_K`/`NEXUSPOUCH_SEARCH_OVERFETCH` 可调。基线（hash embedder, hybrid, k=10）：R@1=R@5=R@10=MRR=nDCG=1.000；keyword 对照 R@10=0.444） | 设计文档 RECALL_ACCURACY_DESIGN.md |
 | R2：两阶段召回（粗召回 + 规则/小模型 rerank）+ 时间衰减 + 去重聚合 + 片段返回 | 待实现 | R1 |
 | R3：反馈闭环（点击/采纳/纠错事件）+ 定期回归 + 可选 A/B | 待实现 | R1/R2 |
 

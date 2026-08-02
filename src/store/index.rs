@@ -8,10 +8,11 @@
 //! files <= 1MB. Index updates ride the commit/delete hooks next to EventBus;
 //! `nexuspouch index rebuild` / admin `/index/rebuild` rescan the tree.
 
-use super::{browse, Local};
+use super::{browse, Local, SearchFilter};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -135,6 +136,7 @@ impl SearchIndex {
         device: Option<&str>,
         state: Option<&str>,
         limit: usize,
+        filter: Option<&SearchFilter>,
     ) -> Result<Vec<Value>, String> {
         let guard = self.conn.lock().map_err(|e| e.to_string())?;
         let conn = guard.as_ref().ok_or_else(|| "index unavailable".to_string())?;
@@ -161,6 +163,26 @@ impl SearchIndex {
             sql.push_str(" AND f.state = ?");
             args.push(SqlValue::Text(st.to_string()));
         }
+        if let Some(f) = filter {
+            // agent/project derive from the sessions path convention
+            // `<agent>/<project>/<file>`; time range hits files.mtime.
+            if let Some(a) = f.agent.as_deref().filter(|s| !s.is_empty()) {
+                sql.push_str(" AND f.path LIKE ? ESCAPE '\\'");
+                args.push(SqlValue::Text(format!("{}/%", like_escape(a))));
+            }
+            if let Some(p) = f.project.as_deref().filter(|s| !s.is_empty()) {
+                sql.push_str(" AND f.path LIKE ? ESCAPE '\\'");
+                args.push(SqlValue::Text(format!("%/{}/%", like_escape(p))));
+            }
+            if let Some(s) = f.since_ms {
+                sql.push_str(" AND f.mtime >= ?");
+                args.push(SqlValue::Integer(s));
+            }
+            if let Some(u) = f.until_ms {
+                sql.push_str(" AND f.mtime <= ?");
+                args.push(SqlValue::Integer(u));
+            }
+        }
         sql.push_str(" ORDER BY score LIMIT ?");
         let limit = limit.clamp(1, 200);
         args.push(SqlValue::Integer(limit as i64));
@@ -186,6 +208,27 @@ impl SearchIndex {
             out.push(row.map_err(|e| e.to_string())?);
         }
         Ok(out)
+    }
+
+    /// Look up indexed mtimes for a set of URIs. Vector hits carry no mtime,
+    /// so hybrid time-range filtering resolves them here.
+    pub fn mtimes_for(&self, uris: &[String]) -> HashMap<String, i64> {
+        let mut out = HashMap::new();
+        let Ok(guard) = self.conn.lock() else {
+            return out;
+        };
+        let Some(conn) = guard.as_ref() else {
+            return out;
+        };
+        let Ok(mut stmt) = conn.prepare("SELECT mtime FROM files WHERE uri = ?1") else {
+            return out;
+        };
+        for u in uris {
+            if let Ok(m) = stmt.query_row(params![u], |r| r.get::<_, i64>(0)) {
+                out.insert(u.clone(), m);
+            }
+        }
+        out
     }
 
     pub fn clear(&self) -> Result<(), String> {
@@ -279,7 +322,11 @@ fn build_entry(
         .unwrap_or(0);
     let task = super::manifest::task_root(rel).unwrap_or_else(|| "".into());
     let summary = task_summary(local, space, device, &task);
-    let body = if is_text_file(rel) && size as usize <= MAX_BODY_BYTES {
+    let body = if space == super::spaces::SESSIONS_SPACE {
+        // Sessions transcripts are .jsonl (not in TEXT_EXTS): always extract,
+        // reading only a prefix when the file exceeds the inline cap.
+        read_text_prefix(&full, size)
+    } else if is_text_file(rel) && size as usize <= MAX_BODY_BYTES {
         std::fs::read(&full)
             .ok()
             .map(|b| String::from_utf8_lossy(&b).into_owned())
@@ -328,6 +375,37 @@ fn is_text_file(rel: &str) -> bool {
     rel.rsplit_once('.')
         .map(|(_, ext)| TEXT_EXTS.contains(&ext.to_ascii_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+/// Read up to MAX_BODY_BYTES of a text file; oversized files contribute a
+/// prefix (sessions transcripts can far exceed the inline cap).
+fn read_text_prefix(full: &Path, size: i64) -> String {
+    use std::io::Read;
+    if size as usize <= MAX_BODY_BYTES {
+        return std::fs::read(full)
+            .ok()
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default();
+    }
+    let Ok(file) = std::fs::File::open(full) else {
+        return String::new();
+    };
+    let mut buf = Vec::with_capacity(MAX_BODY_BYTES);
+    if file
+        .take(MAX_BODY_BYTES as u64)
+        .read_to_end(&mut buf)
+        .is_err()
+    {
+        return String::new();
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Escape LIKE wildcards so agent/project names stay literal (ESCAPE '\').
+fn like_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 pub fn index_entry_from_commit(
@@ -458,16 +536,109 @@ mod tests {
             summary: Some("Q2 sales report".into()),
             body: "revenue grew 20%".into(),
         });
-        let hits = idx.search("revenue", None, None, None, 10).unwrap();
+        let hits = idx.search("revenue", None, None, None, 10, None).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0]["path"], "t-1/report.md");
         assert!(hits[0]["snippet"].as_str().unwrap().contains("revenue"));
 
-        let hits = idx.search("grew", Some("files"), None, None, 10).unwrap();
+        let hits = idx
+            .search("grew", Some("files"), None, None, 10, None)
+            .unwrap();
         assert!(hits.is_empty());
 
         idx.remove("store://artifacts/aaaaaaaaaaaaaaaa/t-1/report.md");
-        assert!(idx.search("revenue", None, None, None, 10).unwrap().is_empty());
+        assert!(
+            idx.search("revenue", None, None, None, 10, None)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn search_filter_agent_project_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let idx = SearchIndex::open(dir.path());
+        let mk = |path: &str, mtime: i64| IndexEntry {
+            uri: format!("store://sessions/{DEV}/{path}"),
+            space: "sessions".into(),
+            device: DEV.into(),
+            path: path.into(),
+            sha256: "a".repeat(64),
+            size: 4,
+            mtime,
+            task: "".into(),
+            state: "committed".into(),
+            summary: None,
+            body: "deploy rollback runbook".into(),
+        };
+        idx.index_file(&mk("claude-code/proj-a/s1.jsonl", 1000));
+        idx.index_file(&mk("codex/proj-a/s2.jsonl", 2000));
+        idx.index_file(&mk("codex/proj-b/s3.jsonl", 3000));
+
+        let all = idx
+            .search("deploy", Some("sessions"), None, None, 10, None)
+            .unwrap();
+        assert_eq!(all.len(), 3);
+
+        let agent = SearchFilter {
+            agent: Some("codex".into()),
+            ..Default::default()
+        };
+        let hits = idx
+            .search("deploy", Some("sessions"), None, None, 10, Some(&agent))
+            .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().all(|h| h["path"].as_str().unwrap().starts_with("codex/")));
+
+        let project = SearchFilter {
+            project: Some("proj-a".into()),
+            ..Default::default()
+        };
+        let hits = idx
+            .search("deploy", Some("sessions"), None, None, 10, Some(&project))
+            .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().all(|h| h["path"].as_str().unwrap().contains("/proj-a/")));
+
+        let both = SearchFilter {
+            agent: Some("codex".into()),
+            project: Some("proj-b".into()),
+            ..Default::default()
+        };
+        let hits = idx
+            .search("deploy", Some("sessions"), None, None, 10, Some(&both))
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["path"], "codex/proj-b/s3.jsonl");
+
+        let time = SearchFilter {
+            since_ms: Some(1500),
+            until_ms: Some(2500),
+            ..Default::default()
+        };
+        let hits = idx
+            .search("deploy", Some("sessions"), None, None, 10, Some(&time))
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["path"], "codex/proj-a/s2.jsonl");
+
+        // LIKE metachars in names stay literal.
+        let tricky = SearchFilter {
+            agent: Some("cod%".into()),
+            ..Default::default()
+        };
+        let hits = idx
+            .search("deploy", Some("sessions"), None, None, 10, Some(&tricky))
+            .unwrap();
+        assert!(hits.is_empty());
+
+        let mt = idx.mtimes_for(&[
+            format!("store://sessions/{DEV}/claude-code/proj-a/s1.jsonl"),
+            format!("store://sessions/{DEV}/codex/proj-b/s3.jsonl"),
+            "store://sessions/aaaaaaaaaaaaaaaa/none.jsonl".into(),
+        ]);
+        assert_eq!(mt.len(), 2);
+        assert_eq!(mt[&format!("store://sessions/{DEV}/claude-code/proj-a/s1.jsonl")], 1000);
     }
 
     #[test]
@@ -480,8 +651,40 @@ mod tests {
         let idx = SearchIndex::open(dir.path());
         let n = idx.rebuild(&local).unwrap();
         assert!(n >= 1);
-        let hits = idx.search("beta", None, None, None, 10).unwrap();
+        let hits = idx.search("beta", None, None, None, 10, None).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0]["path"], "t-1/notes.md");
+    }
+
+    #[test]
+    fn sessions_jsonl_body_indexed() {
+        // .jsonl is not in TEXT_EXTS, but sessions transcripts must still get
+        // their body extracted (R1 eval prerequisite).
+        let dir = tempfile::tempdir().unwrap();
+        let local = Local::open(dir.path(), DEV).unwrap();
+        let path = local
+            .root
+            .join(DEV)
+            .join("sessions")
+            .join("claude-code")
+            .join("proj-a")
+            .join("sess-1.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"zebra77 deploy question\"}}\n",
+        )
+        .unwrap();
+        let n = local.rebuild_index().unwrap();
+        assert!(n >= 1);
+        let hits = idx_search_sessions(&local, "zebra77");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["path"], "claude-code/proj-a/sess-1.jsonl");
+    }
+
+    fn idx_search_sessions(local: &Local, q: &str) -> Vec<Value> {
+        local
+            .search_index(q, Some("sessions"), None, None, 10, None)
+            .unwrap()
     }
 }
