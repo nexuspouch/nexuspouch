@@ -548,7 +548,7 @@ mod tests {
         let report = run_eval(&path, 10, true).expect("eval run");
         assert_eq!(report.embedder, "local-hash-v0");
         assert_eq!(report.corpus_docs, 16);
-        assert_eq!(report.total_queries, 36);
+        assert_eq!(report.total_queries, 44);
         assert!(report.recall_at_k > 0.9, "recall@10 = {}", report.recall_at_k);
         assert!(report.mrr > 0.7, "mrr = {}", report.mrr);
         assert!(report.ndcg_at_k > 0.85, "ndcg@10 = {}", report.ndcg_at_k);
@@ -566,6 +566,8 @@ mod tests {
         assert_eq!(hit("ImagePullBackOff"), Some(1)); // exact error string
         assert!(hit("上次部署报错怎么解决的").is_some()); // semantic zh
         assert!(hit("训练时 loss 变成 NaN 怎么办").is_some()); // semantic mixed
+        // Hard paraphrase (no keyword overlap) must still land within top-10.
+        assert!(hit("大促那天服务被拖垮，后来是加了什么机制才把空查挡住的？").is_some());
         // Time-filtered pair isolates the two Redis sessions by month.
         let redis_july = report
             .queries

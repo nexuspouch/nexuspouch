@@ -120,6 +120,14 @@
     {"q": "Redis", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/pay-svc/sess-201.jsonl"], "type": "time", "note": "时间相关:6 月窗口只剩缓存穿透那场", "filter": {"since_ms": 1780272000000, "until_ms": 1782863999999}},
     {"q": "Redis", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/infra-k8s/sess-203.jsonl"], "type": "time", "note": "时间相关:7 月起只剩 AOF 磁盘那场", "filter": {"since_ms": 1782864000000}},
     {"q": "报错", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/shop-api/sess-001.jsonl"], "type": "time", "note": "时间相关:截至 6 月底", "filter": {"until_ms": 1782863999999}},
-    {"q": "训练", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/ml-train/rollout-105.jsonl"], "type": "time", "note": "时间相关:7 月起,sess-005(6 月)被过滤", "filter": {"since_ms": 1782864000000}}
+    {"q": "训练", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/ml-train/rollout-105.jsonl"], "type": "time", "note": "时间相关:7 月起,sess-005(6 月)被过滤", "filter": {"since_ms": 1782864000000}},
+    {"q": "大促那天服务被拖垮，后来是加了什么机制才把空查挡住的？", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/pay-svc/sess-201.jsonl"], "type": "hard", "note": "难样例:语义改写,避免'缓存/穿透/布隆'关键词"},
+    {"q": "模型跑到一半结果变成非法数字，后来怎么查出来的？", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/ml-train/sess-005.jsonl"], "type": "hard", "note": "难样例:避免'loss/NaN'关键词"},
+    {"q": "外部通知延迟，重复进来会不会重复扣款，当时怎么解的？", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/pay-svc/rollout-102.jsonl"], "type": "hard", "note": "难样例:避免'支付/回调/幂等'关键词"},
+    {"q": "发版那次表被卡住了读写，后来用什么工具原地重组的？", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/claude-code/data-pipe/sess-004.jsonl"], "type": "hard", "note": "难样例:避免'迁移/加列/锁'关键词"},
+    {"q": "消费端一直追不上生产速度，后来怎么把落差缩小的？", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/data-pipe/sess-202.jsonl"], "type": "hard", "note": "难样例:避免'Kafka/积压'关键词"},
+    {"q": "快到期那会儿续签老失败，最后是怎么把签发流程救回来的？", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/codex/infra-k8s/rollout-104.jsonl"], "type": "hard", "note": "难样例:避免'证书/ACME'关键词"},
+    {"q": "节点被清空驱逐那次，最后是靠清掉哪些日志腾出空间的？", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/infra-k8s/sess-203.jsonl"], "type": "hard", "note": "难样例:避免'磁盘/AOF'关键词"},
+    {"q": "大促压测那会儿入口老拒绝，后来怎么放开又不会被打穿的？", "gold": ["store://sessions/aaaaaaaaaaaaaaaa/acp-proxy/shop-api/sess-204.jsonl"], "type": "hard", "note": "难样例:避免'限流/429/令牌'关键词"}
   ]
 }
