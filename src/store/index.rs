@@ -198,7 +198,9 @@ impl SearchIndex {
         Ok(())
     }
 
-    /// Walk built-in + declared custom spaces for this device.
+    /// Walk built-in + declared custom spaces for every device tree present
+    /// (peer mirrors included — incremental indexing already records peer
+    /// commits; rebuild should not silently drop them).
     pub fn scan_tree(&self, local: &Local) -> Vec<IndexEntry> {
         let mut spaces: Vec<String> = super::spaces::BUILTIN_SPACES
             .iter()
@@ -209,10 +211,21 @@ impl SearchIndex {
                 spaces.push(p.name);
             }
         }
+        let mut devices: Vec<String> = vec![local.device_id.clone()];
+        if let Ok(rd) = std::fs::read_dir(&local.root) {
+            for entry in rd.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if crate::protocol::is_valid_device_id(&name) && name != local.device_id {
+                    devices.push(name);
+                }
+            }
+        }
         let mut out = Vec::new();
-        for space in spaces {
-            let root = local.root.join(&local.device_id).join(&space);
-            out.extend(collect_tree(local, &root, &space, &local.device_id));
+        for device in &devices {
+            for space in &spaces {
+                let root = local.root.join(device).join(space);
+                out.extend(collect_tree(local, &root, space, device));
+            }
         }
         out
     }
@@ -279,11 +292,10 @@ fn build_entry(
         .unwrap_or(0);
     let task = super::manifest::task_root(rel).unwrap_or_else(|| "".into());
     let summary = task_summary(local, space, device, &task);
-    let body = if is_text_file(rel) && size as usize <= MAX_BODY_BYTES {
-        std::fs::read(&full)
-            .ok()
-            .map(|b| String::from_utf8_lossy(&b).into_owned())
-            .unwrap_or_default()
+    // Sessions transcripts are always text (.jsonl); other spaces stick to
+    // TEXT_EXTS. Oversized files index a prefix instead of nothing.
+    let body = if space == super::spaces::SESSIONS_SPACE || is_text_file(rel) {
+        read_body_prefix(&full, MAX_BODY_BYTES)
     } else {
         String::new()
     };
@@ -328,6 +340,20 @@ fn is_text_file(rel: &str) -> bool {
     rel.rsplit_once('.')
         .map(|(_, ext)| TEXT_EXTS.contains(&ext.to_ascii_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+/// Read up to `cap` bytes as lossy UTF-8 (prefix for oversized files).
+fn read_body_prefix(path: &Path, cap: usize) -> String {
+    use std::io::Read as _;
+    let f = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return String::new(),
+    };
+    let mut buf = Vec::new();
+    if f.take(cap as u64).read_to_end(&mut buf).is_err() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 pub fn index_entry_from_commit(
@@ -483,5 +509,70 @@ mod tests {
         let hits = idx.search("beta", None, None, None, 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0]["path"], "t-1/notes.md");
+    }
+
+    #[test]
+    fn sessions_jsonl_body_indexed() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = Local::open(dir.path(), DEV).unwrap();
+        let path = local
+            .root
+            .join(DEV)
+            .join("sessions")
+            .join("claude-code")
+            .join("s-1.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "{\"role\":\"user\",\"content\":\"deploy error rollback steps\"}\n",
+        )
+        .unwrap();
+        let idx = SearchIndex::open(dir.path());
+        let n = idx.rebuild(&local).unwrap();
+        assert!(n >= 1);
+        let hits = idx.search("rollback", Some("sessions"), None, None, 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["path"], "claude-code/s-1.jsonl");
+    }
+
+    #[test]
+    fn rebuild_covers_peer_device_trees() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = Local::open(dir.path(), DEV).unwrap();
+        // A mirrored peer tree (other device id) is indexed by rebuild too.
+        let path = local
+            .root
+            .join("bbbbbbbbbbbbbbbb")
+            .join("sessions")
+            .join("claude-code")
+            .join("peer-s.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "{\"role\":\"user\",\"content\":\"peerside deploy discussion\"}\n",
+        )
+        .unwrap();
+        let idx = SearchIndex::open(dir.path());
+        idx.rebuild(&local).unwrap();
+        let hits = idx
+            .search("peerside", Some("sessions"), Some("bbbbbbbbbbbbbbbb"), None, 10)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["device"], "bbbbbbbbbbbbbbbb");
+    }
+
+    #[test]
+    fn oversized_body_indexes_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = Local::open(dir.path(), DEV).unwrap();
+        let path = local.root.join(DEV).join("files").join("big.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut content = String::from("needleword at the head\n");
+        content.push_str(&"x".repeat(2 * 1024 * 1024));
+        std::fs::write(&path, content).unwrap();
+        let idx = SearchIndex::open(dir.path());
+        idx.rebuild(&local).unwrap();
+        let hits = idx.search("needleword", Some("files"), None, None, 10).unwrap();
+        assert_eq!(hits.len(), 1);
     }
 }

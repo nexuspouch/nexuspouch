@@ -1,8 +1,10 @@
 # Agent 会话历史管理设计（Session History）
 
-> 状态：P1–P3 + 适配增强（2026-08-02，`codex/sessions-adapt`）——`sessions`
+> 状态：P1–P3 + P1.5 Web UI + 适配增强（2026-08-02）——`sessions`
 > 空间 + strict 清洗 + `--bind`；MCP `session_recall`；网关 transcript 旁路；
-> 格式适配器（claude/codex/acp/generic）+ 消息级 embedding 分块已落地。
+> 格式适配器（claude/codex/acp/generic）+ 消息级 embedding 分块已落地；
+> **`/admin/sessions` 三屏（总览/详情/搜索）已上线**（含 jsonl 索引、
+> RFC3339 时间戳、rebuild 跨设备三项修复）。
 > 定位：把各 agent 的会话历史纳入 Nexuspouch 管理——跨设备备份、版本化、
 > 全文与语义召回。会话历史是记忆层的最大数据源，与
 > [VECTOR_SEARCH_DESIGN.md](VECTOR_SEARCH_DESIGN.md) 直接衔接。
@@ -120,13 +122,25 @@
 - 验收：两个 agent 的历史文件被摄取、可 `store_search(space=sessions)` 命中、
   `versions` 有版本、手机/另一设备可见。
 
-### P1.5 Web 会话管理 UI（卖点落地，1-2 周；待实现）
+### P1.5 Web 会话管理 UI（卖点落地，1-2 周；✅ 已落地）
 
-- Web 界面（节点自带，Bearer/loopback 鉴权）三屏：总览 / 详情 / 搜索；
-- 详情屏按规范化 NDJSON 渲染对话流，工具调用折叠，版本回看；
-- 搜索屏调 `store_search(space=sessions)`，结果直达来源；
-- 界面保留"其他设备同步"与"语义回忆"入口（占位，指向 P2 / H 向量）；
+- Web 界面（节点自带 `/admin/sessions`，Bearer/loopback 鉴权）三屏：总览 / 详情 / 搜索；
+- 详情屏按适配层规范化渲染对话流（claude tool_use / codex function_call 折叠为 tool 块），
+  版本回看（`@vN` 下拉切换）；
+- 搜索屏调 `/admin/api/sessions/search`（FTS5 默认，勾选「语义回忆」走 hybrid），结果直达详情；
+- 界面保留"其他设备同步"（设备过滤）与"语义回忆"（semantic 开关）入口；
 - 验收：用户装好节点即看到全部历史会话并可搜索跳转（演示时刻）。
+
+落地附带的修复（2026-08-02）：
+
+- sessions `.jsonl` 正文原本不进 FTS/向量索引（TEXT_EXTS 缺口 + 超 1MB 全丢）——
+  已修：sessions 恒抽 body，超大文件索引前缀；
+- claude/codex RFC3339 时间戳原本解析为 0 —— 已修；
+- `index rebuild` 原本只扫本机设备（peer 镜像树 rebuild 后从搜索消失）——
+  已修：scan_tree 枚举全部设备树。
+
+已知限制：总览首次加载为 O(会话总字节)（进程内 SummaryCache 以 size/mtime 失效，
+后续加载只重算变动文件）；事件数为原始 NDJSON 行数（含非消息行）。
 
 ### P2 语义召回（并入向量搜索）
 

@@ -9,7 +9,7 @@ use serde_json::Value;
 const CHUNK_CHARS: usize = 3500;
 const MAX_CHUNKS: usize = 32;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SessionTurn {
     pub agent: String,
     pub session_id: String,
@@ -25,6 +25,17 @@ pub enum AdapterKind {
     Claude,
     Codex,
     Generic,
+}
+
+impl AdapterKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AdapterKind::Acp => "acp",
+            AdapterKind::Claude => "claude",
+            AdapterKind::Codex => "codex",
+            AdapterKind::Generic => "generic",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -58,7 +69,7 @@ pub fn adapt_transcript(raw: &str, path_hint: &str) -> AdaptResult {
     }
 }
 
-fn agent_from_path(path: &str) -> String {
+pub(crate) fn agent_from_path(path: &str) -> String {
     let norm = path.replace('\\', "/");
     let mut parts = norm.split('/').filter(|s| !s.is_empty());
     parts
@@ -69,7 +80,7 @@ fn agent_from_path(path: &str) -> String {
         .collect()
 }
 
-fn session_from_path(path: &str) -> String {
+pub(crate) fn session_from_path(path: &str) -> String {
     let norm = path.replace('\\', "/");
     let name = norm.rsplit('/').next().unwrap_or("session");
     name.trim_end_matches(".jsonl")
@@ -186,24 +197,38 @@ fn parse_claude(raw: &str, agent: &str, session_id: &str) -> Vec<SessionTurn> {
         let blocks = v
             .pointer("/message/content")
             .or_else(|| v.get("content"));
+        let ts_ms = parse_ts_ms(v.get("timestamp"));
         let content = text_value(blocks).unwrap_or_default();
-        if content.trim().is_empty() {
-            continue;
+        let content = content.trim();
+        if !content.is_empty() {
+            seq += 1;
+            let role = if ty == "user" {
+                "user"
+            } else {
+                "assistant"
+            };
+            out.push(SessionTurn {
+                agent: agent.to_string(),
+                session_id: session_id.to_string(),
+                seq,
+                ts_ms,
+                role: role.into(),
+                content: content.to_string(),
+            });
         }
-        seq += 1;
-        let role = if ty == "user" {
-            "user"
-        } else {
-            "assistant"
-        };
-        out.push(SessionTurn {
-            agent: agent.to_string(),
-            session_id: session_id.to_string(),
-            seq,
-            ts_ms: parse_ts_ms(v.get("timestamp")),
-            role: role.into(),
-            content: content.trim().to_string(),
-        });
+        if ty == "assistant" {
+            for (name, brief) in tool_uses(blocks) {
+                seq += 1;
+                out.push(SessionTurn {
+                    agent: agent.to_string(),
+                    session_id: session_id.to_string(),
+                    seq,
+                    ts_ms,
+                    role: "tool".into(),
+                    content: format!("{name}: {brief}"),
+                });
+            }
+        }
     }
     out
 }
@@ -245,6 +270,27 @@ fn parse_codex(raw: &str, agent: &str, session_id: &str) -> Vec<SessionTurn> {
                     role: role.into(),
                     content: content.trim().to_string(),
                 });
+            }
+            if ptype == "function_call" {
+                let name = payload.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                if !name.is_empty() {
+                    let brief = payload
+                        .get("arguments")
+                        .and_then(|a| a.as_str())
+                        .unwrap_or("")
+                        .chars()
+                        .take(200)
+                        .collect::<String>();
+                    seq += 1;
+                    out.push(SessionTurn {
+                        agent: agent.to_string(),
+                        session_id: session_id.to_string(),
+                        seq,
+                        ts_ms: parse_ts_ms(v.get("timestamp")),
+                        role: "tool".into(),
+                        content: format!("{name}: {brief}"),
+                    });
+                }
             }
             continue;
         }
@@ -351,6 +397,28 @@ fn text_value(v: Option<&Value>) -> Option<String> {
     }
 }
 
+/// Extract Claude `tool_use` blocks as (name, brief input) pairs, in order.
+fn tool_uses(blocks: Option<&Value>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let Some(Value::Array(arr)) = blocks else {
+        return out;
+    };
+    for item in arr {
+        if item.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
+            continue;
+        }
+        let Some(name) = item.get("name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        let brief = item
+            .get("input")
+            .map(|i| i.to_string().chars().take(200).collect::<String>())
+            .unwrap_or_default();
+        out.push((name.to_string(), brief));
+    }
+    out
+}
+
 fn parse_ts_ms(v: Option<&Value>) -> i64 {
     let Some(v) = v else {
         return 0;
@@ -366,8 +434,10 @@ fn parse_ts_ms(v: Option<&Value>) -> i64 {
         if let Ok(n) = s.parse::<i64>() {
             return if n < 1_000_000_000_000 { n * 1000 } else { n };
         }
-        // Best-effort ISO: keep 0 if chrono parse unavailable; callers don't require it.
-        let _ = s;
+        // RFC3339/ISO-8601 timestamps (Claude/Codex transcripts).
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+            return dt.timestamp_millis();
+        }
     }
     0
 }
@@ -476,5 +546,57 @@ mod tests {
         let chunks = chunk_turns(&turns);
         assert!(chunks.len() >= 2);
         assert!(chunks.len() <= MAX_CHUNKS);
+    }
+
+    #[test]
+    fn claude_tool_use_emits_tool_turns() {
+        let raw = concat!(
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-05-16T08:00:01.000Z\",\"message\":{\"content\":[",
+            "{\"type\":\"text\",\"text\":\"我来查一下\"},",
+            "{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"ls -la\"}},",
+            "{\"type\":\"tool_use\",\"name\":\"Read\",\"input\":{\"file_path\":\"/tmp/a.rs\"}}",
+            "]}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-05-16T08:00:02.000Z\",\"message\":{\"content\":[",
+            "{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/a.rs\"}}",
+            "]}}\n"
+        );
+        let r = adapt_transcript(raw, "claude-code/s.jsonl");
+        assert_eq!(r.kind, AdapterKind::Claude);
+        // text turn first, then tool turns in block order; tool-only line still yields a turn
+        assert_eq!(r.turns.len(), 4);
+        assert_eq!(r.turns[0].role, "assistant");
+        assert_eq!(r.turns[0].content, "我来查一下");
+        assert_eq!(r.turns[1].role, "tool");
+        assert!(r.turns[1].content.starts_with("Bash: "));
+        assert!(r.turns[1].content.contains("ls -la"));
+        assert_eq!(r.turns[2].role, "tool");
+        assert!(r.turns[2].content.starts_with("Read: "));
+        assert_eq!(r.turns[3].role, "tool");
+        assert!(r.turns[3].content.starts_with("Edit: "));
+        // seq strictly increasing
+        for w in r.turns.windows(2) {
+            assert!(w[0].seq < w[1].seq);
+        }
+    }
+
+    #[test]
+    fn codex_function_call_emits_tool_turn() {
+        let raw = concat!(
+            "{\"type\":\"response_item\",\"timestamp\":1721300000000,",
+            "\"payload\":{\"type\":\"function_call\",\"name\":\"shell\",\"arguments\":\"{\\\"cmd\\\":\\\"cargo test\\\"}\"}}\n"
+        );
+        let r = adapt_transcript(raw, "codex/s.jsonl");
+        assert_eq!(r.turns.len(), 1);
+        assert_eq!(r.turns[0].role, "tool");
+        assert!(r.turns[0].content.starts_with("shell: "));
+        assert!(r.turns[0].content.contains("cargo test"));
+    }
+
+    #[test]
+    fn rfc3339_timestamp_parsed() {
+        let raw = "{\"type\":\"user\",\"timestamp\":\"2026-05-16T08:00:00.000Z\",\"message\":{\"content\":\"hello world\"}}\n";
+        let r = adapt_transcript(raw, "claude-code/s.jsonl");
+        assert_eq!(r.turns.len(), 1);
+        assert_eq!(r.turns[0].ts_ms, 1_778_918_400_000);
     }
 }

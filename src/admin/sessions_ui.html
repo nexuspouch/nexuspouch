@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>会话管理 · Nexuspouch</title>
+<style>
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { margin: 0; padding: 1.25rem; max-width: 960px; }
+h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+h2 { font-size: 1rem; margin: 0 0 .5rem; }
+h3 { font-size: .95rem; margin: 1rem 0 .35rem; }
+.muted { opacity: .7; font-size: .9rem; }
+.card { border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 10px; padding: 1rem; margin: 1rem 0; }
+button, input, select { font: inherit; padding: .4rem .7rem; }
+button { cursor: pointer; }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.err { color: #c62828; }
+.ok { color: #2e7d32; }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid
+  color-mix(in srgb, CanvasText 12%, transparent); }
+a { color: #1565c0; text-decoration: none; }
+a:hover { text-decoration: underline; }
+@media (prefers-color-scheme: dark) { a { color: #64b5f6; } }
+.nav { display: flex; gap: 1rem; align-items: baseline; margin: .25rem 0 0; }
+.nav a { font-size: .95rem; }
+.turn { margin: .5rem 0; padding: .6rem .8rem; border-radius: 10px;
+  white-space: pre-wrap; word-break: break-word; font-size: .92rem; }
+.turn.user { background: color-mix(in srgb, #1565c0 14%, Canvas); }
+.turn.assistant { background: color-mix(in srgb, CanvasText 7%, Canvas); }
+.turn .meta { font-size: .75rem; opacity: .6; margin-bottom: .25rem; }
+details.tool { margin: .3rem 0 .3rem 1rem; font-size: .85rem;
+  border-left: 3px solid color-mix(in srgb, CanvasText 25%, transparent);
+  padding-left: .6rem; }
+details.tool summary { cursor: pointer; opacity: .8; }
+details.tool pre { white-space: pre-wrap; word-break: break-word;
+  font-size: .8rem; opacity: .85; margin: .35rem 0 0; }
+.badge { display: inline-block; font-size: .72rem; padding: .1rem .45rem;
+  border-radius: 999px; border: 1px solid color-mix(in srgb, CanvasText 30%, transparent);
+  opacity: .8; margin-left: .35rem; }
+.hit { margin: .6rem 0; padding: .6rem .8rem; border-radius: 10px;
+  border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
+.hit .snip { font-size: .88rem; margin-top: .25rem; }
+.hit .snip b { color: #ef6c00; }
+.warn { display: none; margin: 0 0 1rem; padding: .75rem 1rem; border-radius: 8px;
+  background: color-mix(in srgb, #f9a825 22%, Canvas); border: 1px solid #f9a825; }
+.warn.show { display: block; }
+.title-link { font-weight: 600; }
+</style>
+</head>
+<body>
+  <h1>会话管理</h1>
+  <p class="muted">统一会话管理 · 本机采集 / 统一搜索 / 永不丢失 —— 这只是第一扇窗：
+    其他设备同步见设备过滤，语义回忆见搜索开关，产物 / 记忆空间见
+    <a href="/admin">管理面</a>。</p>
+  <div class="nav">
+    <a href="#/">总览</a>
+    <a href="#/search">搜索</a>
+    <span class="muted" id="navHint"></span>
+  </div>
+  <div class="card row">
+    <label>Token <input id="token" type="password" placeholder="admin token" style="min-width:14rem"/></label>
+    <button id="saveToken">保存</button>
+    <span class="muted">与 <a href="/admin">管理面</a> 共用 token</span>
+  </div>
+  <div id="notice" class="warn" role="alert"></div>
+  <div id="app"></div>
+  <p id="msg" class="err"></p>
+<script>
+const $ = (id) => document.getElementById(id);
+const tokenKey = 'shepaw_admin_token';
+$('token').value = sessionStorage.getItem(tokenKey) || '';
+$('saveToken').onclick = () => {
+  sessionStorage.setItem(tokenKey, $('token').value.trim());
+  route();
+};
+function headers() {
+  const t = sessionStorage.getItem(tokenKey) || '';
+  const h = {'Accept':'application/json'};
+  if (t) h['Authorization'] = 'Bearer ' + t;
+  return h;
+}
+async function api(path, opts={}) {
+  const res = await fetch(path, {...opts, headers: {...headers(), ...(opts.headers||{})}});
+  if (res.status === 401) throw new Error('unauthorized — 检查 token');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || data.error || res.statusText);
+  return data;
+}
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
+    .replaceAll('"','&quot;').replaceAll("'","&#39;");
+}
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+function fmtBytes(n) {
+  n = Number(n)||0;
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n/1048576).toFixed(1) + ' MB';
+  return (n/1073741824).toFixed(1) + ' GB';
+}
+function shortId(id) {
+  id = String(id||'');
+  return id.length > 8 ? id.slice(0,8) + '…' : id;
+}
+function fmtTime(ms) {
+  ms = Number(ms)||0;
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString();
+}
+function fmtDuration(ms) {
+  if (ms == null) return '—';
+  ms = Number(ms)||0;
+  const m = Math.round(ms/60000);
+  if (m < 1) return '<1 分钟';
+  if (m < 60) return m + ' 分钟';
+  const h = Math.floor(m/60);
+  if (h < 24) return h + ' 小时 ' + (m%60) + ' 分';
+  const d = Math.floor(h/24);
+  return d + ' 天 ' + (h%24) + ' 小时';
+}
+function notice(text) {
+  const n = $('notice');
+  if (text) { n.textContent = text; n.classList.add('show'); }
+  else { n.textContent = ''; n.classList.remove('show'); }
+}
+function setMsg(e) { $('msg').textContent = e ? String(e.message||e) : ''; }
+
+// ---------- routing ----------
+window.addEventListener('hashchange', route);
+function route() {
+  setMsg(''); notice('');
+  const h = location.hash || '#/';
+  if (h.startsWith('#/s/')) {
+    showDetail(decodeURIComponent(h.slice(4)));
+  } else if (h.startsWith('#/search')) {
+    const qs = h.includes('?') ? h.slice(h.indexOf('?')+1) : '';
+    showSearch(new URLSearchParams(qs));
+  } else {
+    showOverview();
+  }
+}
+
+// ---------- overview (#/) ----------
+async function showOverview(device) {
+  const app = $('app');
+  app.innerHTML = '';
+  const card = el('div', 'card');
+  const bar = el('div', 'row');
+  const h2 = el('h2', null, '全部会话');
+  bar.appendChild(h2);
+  const devSel = el('select');
+  devSel.id = 'ovDevice';
+  bar.appendChild(el('span', 'muted', '设备'));
+  bar.appendChild(devSel);
+  const refreshBtn = el('button', null, '刷新');
+  bar.appendChild(refreshBtn);
+  const count = el('span', 'muted');
+  bar.appendChild(count);
+  card.appendChild(bar);
+  const body = el('div');
+  body.style.marginTop = '.75rem';
+  card.appendChild(body);
+  app.appendChild(card);
+
+  refreshBtn.onclick = () => showOverview(devSel.value || undefined);
+  devSel.onchange = () => showOverview(devSel.value || undefined);
+
+  try {
+    const q = new URLSearchParams();
+    if (device) q.set('device', device);
+    const out = await api('/admin/api/sessions/overview' + (q.size ? '?' + q : ''));
+    // device select
+    devSel.innerHTML = '';
+    const all = el('option');
+    all.value = ''; all.textContent = '全部设备';
+    devSel.appendChild(all);
+    for (const d of (out.devices || [])) {
+      const o = el('option');
+      o.value = d; o.textContent = shortId(d);
+      devSel.appendChild(o);
+    }
+    if (device) devSel.value = device;
+    count.textContent = '共 ' + (out.total||0) + ' 个会话' +
+      (out.truncated ? '（仅显示前 ' + (out.sessions||[]).length + ' 个，可加设备过滤）' : '');
+    const sessions = out.sessions || [];
+    if (!sessions.length) {
+      body.appendChild(el('p', 'muted',
+        '暂无会话。把 agent 会话目录绑定到 sessions 空间（--bind …=sessions/<agent>）' +
+        '或经 agent-bridge 旁路写入后，这里会自动出现。'));
+      return;
+    }
+    // group by agent, preserving mtime desc order within groups
+    const groups = {};
+    const order = [];
+    for (const s of sessions) {
+      const a = s.agent || 'unknown';
+      if (!groups[a]) { groups[a] = []; order.push(a); }
+      groups[a].push(s);
+    }
+    for (const a of order) {
+      const list = groups[a];
+      body.appendChild(el('h3', null, a + '（' + list.length + '）'));
+      const table = el('table');
+      table.innerHTML = '<thead><tr><th>会话</th><th>项目</th><th>更新时间</th>' +
+        '<th>时长</th><th>事件数</th><th>大小</th></tr></thead>';
+      const tbody = el('tbody');
+      for (const s of list) {
+        const tr = el('tr');
+        const tdT = el('td');
+        const link = el('a', 'title-link', s.title || s.session_id);
+        link.href = '#/s/' + encodeURIComponent(s.uri);
+        tdT.appendChild(link);
+        tdT.appendChild(el('div', 'muted', (s.session_id||'') + ' · ' + (s.kind||'')));
+        tr.appendChild(tdT);
+        tr.appendChild(el('td', null, s.project || '—'));
+        tr.appendChild(el('td', null, fmtTime(s.mtime)));
+        tr.appendChild(el('td', null, fmtDuration(s.duration_ms)));
+        tr.appendChild(el('td', null, String(s.events||0)));
+        tr.appendChild(el('td', null, fmtBytes(s.size)));
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      body.appendChild(table);
+    }
+    $('navHint').textContent = '';
+  } catch (e) { setMsg(e); }
+}
+
+// ---------- detail (#/s/<uri>) ----------
+async function showDetail(uri) {
+  const app = $('app');
+  app.innerHTML = '';
+  const back = el('p');
+  const backA = el('a', null, '← 返回总览');
+  backA.href = '#/';
+  back.appendChild(backA);
+  app.appendChild(back);
+  const card = el('div', 'card');
+  card.appendChild(el('p', 'muted', '加载中…'));
+  app.appendChild(card);
+  try {
+    const d = await api('/admin/api/sessions/detail?uri=' + encodeURIComponent(uri));
+    card.innerHTML = '';
+    // header
+    const head = el('div', 'row', null);
+    head.style.justifyContent = 'space-between';
+    const titleBox = el('div');
+    titleBox.appendChild(el('h2', null, (d.agent||'') + ' · ' + (d.session_id||'')));
+    const sub = el('div', 'muted',
+      (d.project ? d.project + ' · ' : '') + '设备 ' + shortId(d.device) +
+      ' · ' + (d.kind||'') + ' · ' + fmtBytes(d.size) + ' · 原文（未脱敏）');
+    titleBox.appendChild(sub);
+    head.appendChild(titleBox);
+    // version select
+    const vbox = el('label', 'row', null);
+    vbox.appendChild(el('span', 'muted', '版本'));
+    const vsel = el('select');
+    const versions = d.versions || [];
+    for (const v of versions) {
+      const o = el('option');
+      o.value = 'v' + v.v;
+      o.textContent = 'v' + v.v + ' · ' + fmtTime(v.mtime) + ' · ' + fmtBytes(v.size);
+      vsel.appendChild(o);
+    }
+    vbox.appendChild(vsel);
+    if (d.protected) {
+      const pb = el('span', 'badge', 'protected');
+      vbox.appendChild(pb);
+    }
+    if (versions.length) {
+      const cur = d.ref === 'latest' ? 'v' + (d.version != null ? d.version : versions[versions.length-1].v) : d.ref;
+      vsel.value = cur;
+      vsel.onchange = () => {
+        const base = d.uri;
+        const pick = vsel.value;
+        const top = versions[versions.length-1];
+        const target = ('v' + top.v === pick) ? base : base + '@' + pick;
+        location.hash = '#/s/' + encodeURIComponent(target);
+      };
+    }
+    head.appendChild(vbox);
+    card.appendChild(head);
+    if (d.truncated) {
+      card.appendChild(el('p', 'muted', '（内容过长，已截断显示）'));
+    }
+    // turns
+    const flow = el('div');
+    for (const t of (d.turns || [])) {
+      if (t.role === 'tool') {
+        const det = el('details', 'tool');
+        const sum = el('summary', null, '🔧 ' + toolName(t.content));
+        det.appendChild(sum);
+        det.appendChild(el('pre', null, t.content || ''));
+        flow.appendChild(det);
+        continue;
+      }
+      const div = el('div', 'turn ' + (t.role === 'user' ? 'user' : 'assistant'));
+      const meta = el('div', 'meta',
+        (t.role === 'user' ? '用户' : '助手') + (t.ts_ms ? ' · ' + fmtTime(t.ts_ms) : ''));
+      div.appendChild(meta);
+      div.appendChild(el('div', null, t.content || ''));
+      flow.appendChild(div);
+    }
+    if (!(d.turns || []).length) {
+      flow.appendChild(el('p', 'muted', '（无法解析出对话内容——文件可能为空或格式未识别）'));
+    }
+    card.appendChild(flow);
+    app.appendChild(card);
+    $('navHint').textContent = '';
+  } catch (e) {
+    card.innerHTML = '';
+    card.appendChild(el('p', 'err', String(e.message||e)));
+    app.appendChild(card);
+  }
+}
+function toolName(content) {
+  const s = String(content||'');
+  const i = s.indexOf(':');
+  return i > 0 ? s.slice(0, i) : s.slice(0, 40);
+}
+
+// ---------- search (#/search) ----------
+async function showSearch(params) {
+  const app = $('app');
+  app.innerHTML = '';
+  const card = el('div', 'card');
+  card.appendChild(el('h2', null, '搜索会话'));
+  const form = el('form', 'row');
+  const q = el('input');
+  q.placeholder = '关键词或语义描述，如「上次部署报错怎么解决」';
+  q.style.minWidth = '18rem';
+  q.value = params.get('q') || '';
+  const devSel = el('select');
+  const semLabel = el('label', 'row');
+  const sem = el('input');
+  sem.type = 'checkbox';
+  sem.checked = params.get('semantic') === 'true';
+  semLabel.appendChild(sem);
+  semLabel.appendChild(el('span', null, '语义回忆（hybrid）'));
+  const go = el('button', null, '搜索');
+  go.type = 'submit';
+  form.appendChild(q);
+  form.appendChild(devSel);
+  form.appendChild(semLabel);
+  form.appendChild(go);
+  card.appendChild(form);
+  const results = el('div');
+  card.appendChild(results);
+  app.appendChild(card);
+  // devices for filter
+  try {
+    const ov = await api('/admin/api/sessions/overview');
+    devSel.innerHTML = '';
+    const all = el('option'); all.value = ''; all.textContent = '全部设备';
+    devSel.appendChild(all);
+    for (const d of (ov.devices || [])) {
+      const o = el('option'); o.value = d; o.textContent = shortId(d);
+      devSel.appendChild(o);
+    }
+    const want = params.get('device') || '';
+    if (want) devSel.value = want;
+  } catch (_) {}
+  form.onsubmit = (ev) => {
+    ev.preventDefault();
+    const p = new URLSearchParams();
+    if (q.value.trim()) p.set('q', q.value.trim());
+    if (sem.checked) p.set('semantic', 'true');
+    if (devSel.value) p.set('device', devSel.value);
+    location.hash = '#/search?' + p.toString();
+  };
+  const query = (params.get('q') || '').trim();
+  if (!query) {
+    results.appendChild(el('p', 'muted',
+      '输入查询开始。勾选「语义回忆」走 FTS5+向量混合排序；向量不可用时会自动回退关键词。'));
+    return;
+  }
+  try {
+    const p = new URLSearchParams({q: query});
+    if (params.get('semantic') === 'true') p.set('semantic', 'true');
+    if (params.get('device')) p.set('device', params.get('device'));
+    const out = await api('/admin/api/sessions/search?' + p.toString());
+    results.innerHTML = '';
+    const meta = el('p', 'muted',
+      '命中 ' + (out.total||0) + ' 条 · ' + (out.score_type||'keyword') +
+      (out.embedder ? ' · ' + out.embedder : ''));
+    results.appendChild(meta);
+    if (out.degraded) {
+      notice('向量检索不可用，已回退关键词匹配（语义回忆需要本地 embedding 模型）。');
+    }
+    const hits = out.results || [];
+    if (!hits.length) {
+      results.appendChild(el('p', 'muted', '没有命中。换个说法试试，或先确认会话已入库。'));
+      return;
+    }
+    for (const h of hits) {
+      const box = el('div', 'hit');
+      const head = el('div');
+      const link = el('a', 'title-link', h.path || h.uri);
+      link.href = '#/s/' + encodeURIComponent(h.uri);
+      head.appendChild(link);
+      head.appendChild(el('span', 'muted', ' · 设备 ' + shortId(h.device)));
+      if (h.score_type) head.appendChild(el('span', 'badge', h.score_type));
+      box.appendChild(head);
+      const snip = el('div', 'snip');
+      // FTS snippet carries <b> marks: escape first, then re-allow <b> only.
+      snip.innerHTML = esc(h.snippet || '')
+        .replaceAll('&lt;b&gt;', '<b>').replaceAll('&lt;/b&gt;', '</b>');
+      box.appendChild(snip);
+      results.appendChild(box);
+    }
+  } catch (e) { setMsg(e); }
+}
+
+route();
+</script>
+</body>
+</html>

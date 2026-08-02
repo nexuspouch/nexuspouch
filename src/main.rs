@@ -384,6 +384,7 @@ async fn serve(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         discovery: mdns_discovery,
         local_http,
         listen_port,
+        sessions_cache: Arc::new(admin::sessions::SummaryCache::new()),
     });
 
     let api_state = Arc::new(ApiState {

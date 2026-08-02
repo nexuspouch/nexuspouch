@@ -18,6 +18,7 @@ pub struct AdminState {
     pub discovery: Option<Arc<crate::discovery::Discovery>>,
     pub local_http: String,
     pub listen_port: u16,
+    pub sessions_cache: Arc<super::sessions::SummaryCache>,
 }
 
 pub fn stats(state: &AdminState) -> Result<Map<String, Value>, OpError> {

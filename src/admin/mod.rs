@@ -1,5 +1,7 @@
 pub mod auth;
 pub mod handler;
+pub mod sessions;
+pub mod sessions_ui;
 pub mod ui;
 
 use axum::{
@@ -53,11 +55,16 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/bindings/sync", post(bindings_sync))
         .route("/reprotect", post(reprotect))
         .route("/versions", get(versions_overview))
+        .route("/sessions/overview", get(sessions_overview))
+        .route("/sessions/detail", get(sessions_detail))
+        .route("/sessions/search", get(sessions_search))
         .with_state(state.clone());
 
     Router::new()
         .route("/admin", get(ui_page))
         .route("/admin/", get(ui_page))
+        .route("/admin/sessions", get(sessions_page))
+        .route("/admin/sessions/", get(sessions_page))
         .nest("/admin/api", api)
         .with_state(state)
 }
@@ -67,6 +74,13 @@ async fn ui_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Re
         return unauthorized();
     }
     Html(ui::HTML).into_response()
+}
+
+async fn sessions_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    if !state.auth.authorize_headers(&headers, None) {
+        return unauthorized();
+    }
+    Html(sessions_ui::HTML).into_response()
 }
 
 async fn health(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
@@ -422,6 +436,67 @@ async fn versions_overview(State(state): State<Arc<AdminState>>, headers: Header
     auth_json(state, headers, None, handler::versions_overview).await
 }
 
+#[derive(Deserialize)]
+struct SessionsOverviewQuery {
+    device: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn sessions_overview(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Query(q): Query<SessionsOverviewQuery>,
+) -> Response {
+    auth_json_blocking(state, headers, move |s| {
+        sessions::overview(
+            &s.store,
+            q.device.as_deref(),
+            q.limit.unwrap_or(0),
+            &s.sessions_cache,
+        )
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct SessionsDetailQuery {
+    uri: String,
+}
+
+async fn sessions_detail(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Query(q): Query<SessionsDetailQuery>,
+) -> Response {
+    auth_json_blocking(state, headers, move |s| sessions::detail(&s.store, &q.uri)).await
+}
+
+#[derive(Deserialize)]
+struct SessionsSearchQuery {
+    q: String,
+    device: Option<String>,
+    limit: Option<usize>,
+    #[serde(default)]
+    semantic: bool,
+}
+
+async fn sessions_search(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Query(q): Query<SessionsSearchQuery>,
+) -> Response {
+    auth_json_blocking(state, headers, move |s| {
+        sessions::search(
+            &s.store,
+            &q.q,
+            q.device.as_deref(),
+            q.limit.unwrap_or(0),
+            q.semantic,
+        )
+    })
+    .await
+}
+
 async fn bindings_list(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
     auth_json(state, headers, None, handler::bindings_list).await
 }
@@ -472,6 +547,29 @@ fn unauthorized() -> Response {
         "unauthorized",
     )
         .into_response()
+}
+
+/// `auth_json` for tree-scanning handlers: run the closure off the async
+/// worker so peer ws / /store are not blocked (same pattern as `diagnostics`).
+async fn auth_json_blocking<F>(
+    state: Arc<AdminState>,
+    headers: HeaderMap,
+    f: F,
+) -> Response
+where
+    F: FnOnce(&AdminState) -> Result<Map<String, Value>, crate::store::OpError>
+        + Send
+        + 'static,
+{
+    if !state.auth.authorize_headers(&headers, None) {
+        return unauthorized();
+    }
+    let state2 = Arc::clone(&state);
+    match tokio::task::spawn_blocking(move || f(&state2)).await {
+        Ok(Ok(v)) => Json(Value::Object(v)).into_response(),
+        Ok(Err(e)) => bad_request(e.msg),
+        Err(e) => bad_request(format!("task join: {e}")),
+    }
 }
 
 fn bad_request(msg: impl Into<String>) -> Response {
