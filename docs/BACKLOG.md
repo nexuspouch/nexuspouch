@@ -17,7 +17,7 @@
 |----|------|------|
 | App 侧事件驱动 watcher（当前 Dart 端为轮询 `startPeriodic`；Rust 端 notify 已落地） | ✅ | `watcher` + `startAutoSync`（去抖）+ 周期兜底 |
 | 绑定 UI 目录选择器（当前手输路径，可换 file_selector 原生选目录） | ✅ | `FilePicker.getDirectoryPath` |
-| rename/move 识别（保留版本历史；当前 delete+add） | ✅（Rust inode/sha；Dart 仍 delete+add） | bindings.rs `artifact.renamed` |
+| rename/move 识别（保留版本历史；当前 delete+add） | ✅（Rust inode/sha；Dart sha → LocalStore.rename） | bindings.rs + folder_binding_service |
 | 半写保护（文件连续两次采样一致才摄取） | ✅ | `NEXUSPOUCH_BINDING_STABLE_MS`（默认 300） |
 | 忽略规则变更触发全量对账 | ✅ | index `__meta__.ignore` fingerprint |
 | 扫描限速 + 单绑定文件上限（默认 50 万，可配） | ✅ | `NEXUSPOUCH_BINDING_MAX_FILES` |
@@ -51,7 +51,7 @@
 | 项 | 状态 | 依赖 |
 |----|------|------|
 | Dart master 侧服务端：App 自己当 master（loopback）时 versions / handoff / 自定义空间的服务端逻辑 | **已决策（2026-08-02）：不实现**。master 服务端能力只归 Nexuspouch；PC 单独安装服务；ShePaw App 仅做客户端。手机作 master 时增强能力（版本/交接/自定义空间/语义检索）按降级语义不可用，协议客户端能力保留 | 无 |
-| Windows 节点支持（闲置 PC 当 master） | W1 已推（`codex/windows-w1`）；W2 进行中（`codex/windows-w2`：卷/rename/reparse/服务文档）；W3 见 WINDOWS_SUPPORT.md | CI Windows runner |
+| Windows 节点支持（闲置 PC 当 master） | W1/W2 已推（`codex/windows-w1` / `codex/windows-w2`）；W3 打磨见 WINDOWS_SUPPORT.md；CI Windows 待确认绿 | CI Windows runner |
 | versions 保留策略管理页 / 发布产物可视化 | 待实现（低优先） | M2 |
 
 ## F. 运维 / QA
