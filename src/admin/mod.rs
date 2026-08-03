@@ -2,6 +2,7 @@ pub mod auth;
 pub mod handler;
 pub mod sessions;
 pub mod sessions_ui;
+pub mod static_files;
 pub mod ui;
 
 use axum::{
@@ -63,13 +64,21 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/sessions/feedback", post(sessions_feedback))
         .with_state(state.clone());
 
-    Router::new()
+    let mut app = Router::new()
         .route("/admin", get(ui_page))
         .route("/admin/", get(ui_page))
-        .route("/admin/sessions", get(sessions_page))
-        .route("/admin/sessions/", get(sessions_page))
         .nest("/admin/api", api)
-        .with_state(state)
+        .with_state(state);
+
+    if let Some(st) = static_files::AdminStatic::discover() {
+        app = app.merge(st.router());
+    } else {
+        app = app
+            .route("/admin/sessions", get(sessions_page_legacy))
+            .route("/admin/sessions/", get(sessions_page_legacy));
+    }
+
+    app
 }
 
 /// HTML shells are always served so the browser can show the token form.
@@ -78,8 +87,8 @@ async fn ui_page() -> Response {
     Html(ui::HTML).into_response()
 }
 
-async fn sessions_page() -> Response {
-    Html(sessions_ui::HTML).into_response()
+async fn sessions_page_legacy() -> Response {
+    static_files::fallback_embedded_sessions()
 }
 
 async fn health(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {

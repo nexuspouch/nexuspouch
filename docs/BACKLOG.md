@@ -88,7 +88,7 @@
 | P1：`sessions` 空间 + 格式适配层 + 文件级摄取（复用 M6 绑定）+ FTS5 全文 + 敏感清洗（strict 默认） | ✅（`session_adapt`：claude/codex/acp/generic + fixture） | SESSION_HISTORY_DESIGN.md |
 | P2：会话语义召回（分块 embedding + `session_recall` MCP） | ✅（消息级 `upsert_chunks` + `session_recall` hybrid） | H 向量 + sessions 空间 |
 | P3：agent-bridge 网关 transcript 实时旁路捕获 | ✅（`SessionTranscriptSink` debounce → sessions） | NEXUSPOUCH_URL/DEVICE/TOKEN |
-| P1.5：**Web 会话管理 UI**（总览/详情/搜索三屏，主打卖点落地） | ✅（`/admin/sessions` 三屏；搜索已接 R1 `SearchFilter`：agent/project/since_ms/until_ms） | P1 + R1 |
+| P1.5：**Web 会话管理 UI**（总览/详情/搜索三屏，主打卖点落地） | ✅（`/admin/sessions` 三屏；搜索已接 R1 `SearchFilter` + R2/R3；**前端源码** `web/admin/` Vite+TS，build 后 Rust 托管 `dist/sessions`，无 dist 时回退内嵌 HTML） | P1 + R1 |
 
 设计要点：会话历史是记忆层最大数据源；`sessions` 空间默认 private +
 索引前脱敏；版本化时间线；跨设备备份与语义召回；**主打卖点 = 统一会话管理
