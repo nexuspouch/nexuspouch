@@ -1,5 +1,6 @@
 import { api } from '../../shared/api';
 import { fmtBytes, shortId } from '../../shared/format';
+import { useFeedback } from '../../shared/ui/feedback';
 
 type Props = {
   statsJson: string;
@@ -8,6 +9,7 @@ type Props = {
   selfId: string;
   onError: (e: unknown) => void;
   onRefresh: () => Promise<void>;
+  onGoStorage?: () => void;
 };
 
 export function StatsPanel({
@@ -17,17 +19,20 @@ export function StatsPanel({
   selfId,
   onError,
   onRefresh,
+  onGoStorage,
 }: Props) {
+  const { toast, confirm } = useFeedback();
   const ids = Object.keys(devices);
 
   async function promoteMaster() {
-    if (
-      !confirm(
+    const ok = await confirm({
+      title: '升为本机 master',
+      message:
         '将本节点升为 master？在线会话会收到 master.pointer；离线端上线后经 pointer.query 改指。旧 master 不可达时可能有镜像缺口。',
-      )
-    ) {
-      return;
-    }
+      confirmLabel: '升主',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const out = await api<{
         master?: string;
@@ -38,19 +43,21 @@ export function StatsPanel({
         dial_error?: string;
         hash_gate?: { ran?: boolean; mismatch_count?: number; ok?: boolean };
       }>('/admin/api/master/migrate', { method: 'POST' });
-      alert(
-        `已升主：${shortId(out.master || '')} · epoch ${out.epoch} · 推送 ${
-          out.broadcast_peers || 0
-        } · 种子文件 ${out.seeded_files || 0}${
-          out.old_master_reachable ? '（旧 master 在线）' : '（旧 master 未在线）'
-        }${out.dial_error ? ` · 拨号失败: ${out.dial_error}` : ''}${
-          out.hash_gate?.ran
-            ? ` · 哈希门闩 mismatches=${out.hash_gate.mismatch_count || 0}${
-                out.hash_gate.ok ? ' ok' : ' 有缺口'
-              }`
-            : ''
-        }`,
-      );
+      const detail = [
+        `${shortId(out.master || '')} · epoch ${out.epoch}`,
+        `推送 ${out.broadcast_peers || 0}`,
+        `种子 ${out.seeded_files || 0}`,
+        out.old_master_reachable ? '旧 master 在线' : '旧 master 未在线',
+        out.dial_error ? `拨号失败: ${out.dial_error}` : '',
+        out.hash_gate?.ran
+          ? `哈希门闩 mismatches=${out.hash_gate.mismatch_count || 0}${
+              out.hash_gate.ok ? ' ok' : ' 有缺口'
+            }`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      toast(`已升主：${detail}`, { kind: 'ok', durationMs: 7000 });
       await onRefresh();
     } catch (e) {
       onError(e);
@@ -63,10 +70,16 @@ export function StatsPanel({
         '/admin/api/gc',
         { method: 'POST' },
       );
-      alert(
-        `GC 完成：staging 清理 ${out.staging_removed || 0} 个，回收站释放 ${fmtBytes(
+      toast(
+        `GC 完成：staging ${out.staging_removed || 0} · 回收站释放 ${fmtBytes(
           Number(out.recycle_bytes),
         )}`,
+        {
+          kind: 'ok',
+          action: onGoStorage
+            ? { label: '去存储', onClick: onGoStorage }
+            : undefined,
+        },
       );
       await onRefresh();
     } catch (e) {
@@ -75,13 +88,20 @@ export function StatsPanel({
   }
 
   async function purgeDev(id: string) {
-    if (!confirm(`永久删除设备 ${shortId(id)} 的镜像？不可还原。`)) return;
+    const ok = await confirm({
+      title: '删除设备镜像',
+      message: `永久删除设备 ${shortId(id)} 的镜像？不可还原。`,
+      confirmLabel: '永久删除',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api('/admin/api/devices/purge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ device_id: id }),
       });
+      toast(`已删除镜像 ${shortId(id)}`, { kind: 'ok' });
       await onRefresh();
     } catch (e) {
       onError(e);
@@ -136,7 +156,11 @@ export function StatsPanel({
                   <td>{fmtBytes(total)}</td>
                   <td>
                     {!isSelf ? (
-                      <button type="button" className="danger" onClick={() => void purgeDev(id)}>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => void purgeDev(id)}
+                      >
                         删除镜像
                       </button>
                     ) : null}

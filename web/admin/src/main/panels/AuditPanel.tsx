@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../shared/api';
 import { shortId } from '../../shared/format';
+import { useFeedback } from '../../shared/ui/feedback';
 
 type Props = {
   refreshKey: number;
@@ -9,10 +10,12 @@ type Props = {
 };
 
 export function AuditPanel({ refreshKey, onError, onRefresh }: Props) {
+  const { toast, confirm, prompt, revealSecret } = useFeedback();
   const [auditLog, setAuditLog] = useState('…');
   const [tokenList, setTokenList] = useState('…');
   const [label, setLabel] = useState('');
   const [scope, setScope] = useState('read');
+  const [busy, setBusy] = useState(false);
 
   async function loadAudit() {
     try {
@@ -71,6 +74,7 @@ export function AuditPanel({ refreshKey, onError, onRefresh }: Props) {
   }, [refreshKey]);
 
   async function createToken() {
+    setBusy(true);
     try {
       const out = await api<{ token?: string }>('/admin/api/tokens', {
         method: 'POST',
@@ -80,38 +84,57 @@ export function AuditPanel({ refreshKey, onError, onRefresh }: Props) {
           scopes: [scope],
         }),
       });
-      alert(`Token (copy now):\n${out.token}`);
+      await revealSecret({
+        title: 'API Token 已创建',
+        secret: out.token || '',
+        hint: '仅显示一次，关闭后无法再次查看。请立即复制保存。',
+      });
       await loadTokens();
+      toast('Token 已创建', { kind: 'ok' });
     } catch (e) {
       onError(e);
+    } finally {
+      setBusy(false);
     }
   }
 
   async function runReprotect() {
-    const password = prompt(
-      '再保护密码（与 ShePaw 主密码一致可生成 mirror.tar.enc；留空则仅写清单）',
-      '',
-    );
+    const password = await prompt({
+      title: '再保护镜像',
+      message:
+        '输入再保护密码（与 ShePaw 主密码一致可生成 mirror.tar.enc；留空则仅写清单）',
+      placeholder: '密码（可留空）',
+      password: true,
+      allowEmpty: true,
+      confirmLabel: '继续',
+    });
     if (password === null) return;
-    if (
-      !confirm(
-        password
-          ? '生成加密再保护包（manifest.json + mirror.tar.enc）？'
-          : '生成清单快照（无密文）？',
-      )
-    ) {
-      return;
-    }
+
+    const ok = await confirm({
+      title: '确认再保护',
+      message: password
+        ? '生成加密再保护包（manifest.json + mirror.tar.enc）？'
+        : '生成清单快照（无密文）？',
+      confirmLabel: '开始',
+    });
+    if (!ok) return;
+
+    setBusy(true);
     try {
       const out = await api('/admin/api/reprotect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(password ? { password } : {}),
       });
-      alert(`reprotect ok: ${JSON.stringify(out)}`);
+      toast(`再保护完成：${JSON.stringify(out)}`, {
+        kind: 'ok',
+        durationMs: 6000,
+      });
       await onRefresh();
     } catch (e) {
       onError(e);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -122,6 +145,7 @@ export function AuditPanel({ refreshKey, onError, onRefresh }: Props) {
         <div className="row">
           <button
             type="button"
+            disabled={busy}
             onClick={() => {
               void loadAudit();
               void loadTokens();
@@ -129,7 +153,11 @@ export function AuditPanel({ refreshKey, onError, onRefresh }: Props) {
           >
             刷新审计
           </button>
-          <button type="button" onClick={() => void runReprotect()}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void runReprotect()}
+          >
             再保护镜像
           </button>
         </div>
@@ -148,7 +176,12 @@ export function AuditPanel({ refreshKey, onError, onRefresh }: Props) {
           <option value="events">events</option>
           <option value="admin">admin</option>
         </select>
-        <button type="button" onClick={() => void createToken()}>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy}
+          onClick={() => void createToken()}
+        >
           创建 API Token
         </button>
       </div>

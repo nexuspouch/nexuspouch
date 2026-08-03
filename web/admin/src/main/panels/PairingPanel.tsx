@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../shared/api';
 import { shortId } from '../../shared/format';
+import { useFeedback } from '../../shared/ui/feedback';
 import type { PairPending, PairStart, Peer } from '../types';
 
 type Props = {
@@ -18,6 +19,7 @@ export function PairingPanel({
   onError,
   onRefresh,
 }: Props) {
+  const { toast, confirm } = useFeedback();
   const [qrSvg, setQrSvg] = useState('');
   const [info, setInfo] = useState(
     '点击「开始配对」生成 QR / 配对码，用 App 扫描后在此批准。',
@@ -121,13 +123,20 @@ export function PairingPanel({
   }
 
   async function unpair(fp: string) {
-    if (!confirm(`解除配对 ${shortId(fp)}？`)) return;
+    const ok = await confirm({
+      title: '解除配对',
+      message: `解除配对 ${shortId(fp)}？`,
+      confirmLabel: '解除',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api('/admin/api/peers/remove', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fingerprint: fp }),
       });
+      toast(`已解除 ${shortId(fp)}`, { kind: 'ok' });
       await onRefresh();
     } catch (e) {
       onError(e);

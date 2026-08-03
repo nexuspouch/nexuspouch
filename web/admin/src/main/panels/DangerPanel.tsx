@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../shared/api';
 import { fmtBytes } from '../../shared/format';
+import { useFeedback } from '../../shared/ui/feedback';
 
 type Props = {
   onError: (e: unknown) => void;
@@ -8,14 +9,23 @@ type Props = {
 };
 
 export function DangerPanel({ onError, onRefresh }: Props) {
+  const { toast, confirm } = useFeedback();
   const [confirmText, setConfirmText] = useState('');
+  const [busy, setBusy] = useState(false);
 
   async function wipeSelf() {
     if (confirmText.trim() !== 'DELETE') {
       onError(new Error('请先在输入框输入 DELETE'));
       return;
     }
-    if (!confirm('确认清空本机 store？此操作不可从回收站还原。')) return;
+    const ok = await confirm({
+      title: '清空本机 store',
+      message: '确认清空本机 store？此操作不可从回收站还原。',
+      confirmLabel: '清空',
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
     try {
       const out = await api<{ freed_bytes?: number }>(
         '/admin/api/devices/wipe-self',
@@ -26,10 +36,15 @@ export function DangerPanel({ onError, onRefresh }: Props) {
         },
       );
       setConfirmText('');
-      alert(`已清空本机 store，释放 ${fmtBytes(Number(out.freed_bytes))}`);
+      toast(`已清空本机 store，释放 ${fmtBytes(Number(out.freed_bytes))}`, {
+        kind: 'ok',
+        durationMs: 6000,
+      });
       await onRefresh();
     } catch (e) {
       onError(e);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -46,7 +61,12 @@ export function DangerPanel({ onError, onRefresh }: Props) {
           value={confirmText}
           onChange={(e) => setConfirmText(e.target.value)}
         />
-        <button type="button" className="danger" onClick={() => void wipeSelf()}>
+        <button
+          type="button"
+          className="danger"
+          disabled={busy}
+          onClick={() => void wipeSelf()}
+        >
           清空本机 store
         </button>
       </div>

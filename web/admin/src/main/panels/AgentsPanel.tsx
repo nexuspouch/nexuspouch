@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../shared/api';
+import { useFeedback } from '../../shared/ui/feedback';
 
 type Props = { refreshKey: number; onError: (e: unknown) => void };
 
 export function AgentsPanel({ refreshKey, onError }: Props) {
+  const { toast } = useFeedback();
   const [list, setList] = useState('…');
   const [name, setName] = useState('');
   const [scope, setScope] = useState('store:read');
   const [maxBytes, setMaxBytes] = useState('1073741824');
+  const [busy, setBusy] = useState(false);
 
   async function load() {
     try {
@@ -43,6 +46,7 @@ export function AgentsPanel({ refreshKey, onError }: Props) {
   }, [refreshKey]);
 
   async function create() {
+    setBusy(true);
     try {
       const scopes = scope
         .split(',')
@@ -57,10 +61,13 @@ export function AgentsPanel({ refreshKey, onError }: Props) {
           max_bytes: parseInt(maxBytes || '0', 10),
         }),
       });
-      alert(`Agent created: ${out.id}`);
+      toast(`Agent 已创建：${out.id}`, { kind: 'ok' });
+      setName('');
       await load();
     } catch (e) {
       onError(e);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -93,7 +100,12 @@ export function AgentsPanel({ refreshKey, onError }: Props) {
           value={maxBytes}
           onChange={(e) => setMaxBytes(e.target.value)}
         />
-        <button type="button" onClick={() => void create()}>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy}
+          onClick={() => void create()}
+        >
           创建 Agent
         </button>
       </div>

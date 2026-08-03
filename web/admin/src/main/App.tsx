@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken, seedTokenFromQuery, setToken } from '../shared/api';
 import { fmtBytes, shortId } from '../shared/format';
+import { useFeedback } from '../shared/ui/feedback';
 import { AgentsPanel } from './panels/AgentsPanel';
 import { AuditPanel } from './panels/AuditPanel';
-import { BrowsePanel } from './panels/BrowsePanel';
 import { DangerPanel } from './panels/DangerPanel';
 import { DiscoveryPanel } from './panels/DiscoveryPanel';
 import { ImportPanel } from './panels/ImportPanel';
 import { PairingPanel } from './panels/PairingPanel';
-import { RecyclePanel } from './panels/RecyclePanel';
 import { SpacesPanel } from './panels/SpacesPanel';
 import { StatsPanel } from './panels/StatsPanel';
+import { StoragePanel } from './panels/StoragePanel';
 import { VersionsPanel } from './panels/VersionsPanel';
 import type {
   ImportRequest,
@@ -20,6 +20,7 @@ import type {
 } from './types';
 
 export function App() {
+  const { toast } = useFeedback();
   const [tokenDraft, setTokenDraft] = useState('');
   const [msg, setMsg] = useState('');
   const [stats, setStats] = useState<Stats | null>(null);
@@ -30,15 +31,21 @@ export function App() {
   const [recycle, setRecycle] = useState<RecycleEntry[]>([]);
   const [peerNames, setPeerNames] = useState<Record<string, string>>({});
   const [tick, setTick] = useState(0);
+  const [storageTab, setStorageTab] = useState<'browse' | 'recycle'>('browse');
 
   useEffect(() => {
     seedTokenFromQuery();
     setTokenDraft(getToken());
   }, []);
 
-  const onError = useCallback((err: unknown) => {
-    setMsg(String((err as Error)?.message || err || ''));
-  }, []);
+  const onError = useCallback(
+    (err: unknown) => {
+      const text = String((err as Error)?.message || err || '');
+      setMsg(text);
+      if (text) toast(text, { kind: 'err' });
+    },
+    [toast],
+  );
 
   const refresh = useCallback(async () => {
     setMsg('');
@@ -96,6 +103,14 @@ export function App() {
     void refresh();
   }, [refresh]);
 
+  const goStorage = useCallback((tab: 'browse' | 'recycle' = 'browse') => {
+    setStorageTab(tab);
+    document.getElementById('storage')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }, []);
+
   const volumeWarn =
     stats?.volume_warn &&
     `卷用量告警：已用约 ${Math.round((Number(stats.volume_used_ratio) || 0) * 100)}%（剩余 ${fmtBytes(Number(stats.volume_free_bytes))} / 共 ${fmtBytes(Number(stats.volume_total_bytes))}）。请清理镜像或扩大磁盘。`;
@@ -121,6 +136,14 @@ export function App() {
       {volumeWarn ? (
         <div className="banner volume show" role="alert">
           {volumeWarn}
+          <span className="banner-actions">
+            <button type="button" onClick={() => goStorage('recycle')}>
+              去回收站
+            </button>
+            <button type="button" onClick={() => goStorage('browse')}>
+              去浏览
+            </button>
+          </span>
         </div>
       ) : null}
 
@@ -140,6 +163,7 @@ export function App() {
           onClick={() => {
             setToken(tokenDraft);
             void refresh();
+            toast('Token 已保存', { kind: 'ok' });
           }}
         >
           保存
@@ -170,14 +194,18 @@ export function App() {
         selfId={selfId}
         onError={onError}
         onRefresh={refresh}
+        onGoStorage={() => goStorage('recycle')}
       />
 
-      <BrowsePanel
+      <StoragePanel
         selfId={selfId}
         deviceIds={Object.keys(devices)}
         peerNames={peerNames}
+        recycle={recycle}
         onError={onError}
         onRefresh={refresh}
+        tab={storageTab}
+        onTabChange={setStorageTab}
       />
 
       <ImportPanel
@@ -186,13 +214,10 @@ export function App() {
         received={received}
         onError={onError}
         onRefresh={refresh}
-        onNotice={setMsg}
-      />
-
-      <RecyclePanel
-        entries={recycle}
-        onError={onError}
-        onRefresh={refresh}
+        onNotice={(m) => {
+          setMsg(m);
+          if (m) toast(m, { kind: 'info' });
+        }}
       />
 
       <AuditPanel refreshKey={tick} onError={onError} onRefresh={refresh} />

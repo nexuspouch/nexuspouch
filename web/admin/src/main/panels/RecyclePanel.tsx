@@ -1,25 +1,47 @@
+import { useState } from 'react';
 import { api } from '../../shared/api';
 import { fmtBytes } from '../../shared/format';
+import { useFeedback } from '../../shared/ui/feedback';
 import type { RecycleEntry } from '../types';
 
 type Props = {
   entries: RecycleEntry[];
   onError: (e: unknown) => void;
   onRefresh: () => Promise<void>;
+  onRestored?: () => void;
 };
 
-export function RecyclePanel({ entries, onError, onRefresh }: Props) {
+export function RecyclePanel({
+  entries,
+  onError,
+  onRefresh,
+  onRestored,
+}: Props) {
+  const { toast, confirm } = useFeedback();
+  const [busy, setBusy] = useState(false);
+
   async function empty() {
-    if (!confirm('确认清空回收站？不可还原。')) return;
+    const ok = await confirm({
+      title: '清空回收站',
+      message: '确认清空回收站？此操作不可还原。',
+      confirmLabel: '清空',
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
     try {
       await api('/admin/api/recycle/empty', { method: 'POST' });
       await onRefresh();
+      toast('回收站已清空', { kind: 'ok' });
     } catch (e) {
       onError(e);
+    } finally {
+      setBusy(false);
     }
   }
 
   async function restore(recyclePath: string) {
+    setBusy(true);
     try {
       await api('/admin/api/recycle/restore', {
         method: 'POST',
@@ -27,16 +49,31 @@ export function RecyclePanel({ entries, onError, onRefresh }: Props) {
         body: JSON.stringify({ recycle_path: recyclePath }),
       });
       await onRefresh();
+      toast('已还原', {
+        kind: 'ok',
+        action: onRestored
+          ? { label: '去浏览', onClick: onRestored }
+          : undefined,
+      });
     } catch (e) {
       onError(e);
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <section className="panel">
-      <div className="section-head">
-        <h2>回收站</h2>
-        <button type="button" className="danger" onClick={() => void empty()}>
+    <div className="recycle-pane">
+      <div className="section-head" style={{ marginTop: 0 }}>
+        <p className="muted" style={{ margin: 0 }}>
+          从分区浏览删除的文件会出现在这里，可还原或永久清空。
+        </p>
+        <button
+          type="button"
+          className="danger"
+          disabled={busy || !entries.length}
+          onClick={() => void empty()}
+        >
           清空回收站
         </button>
       </div>
@@ -64,6 +101,7 @@ export function RecyclePanel({ entries, onError, onRefresh }: Props) {
                   <td>
                     <button
                       type="button"
+                      disabled={busy}
                       onClick={() => void restore(e.recycle_path || '')}
                     >
                       还原
@@ -75,6 +113,6 @@ export function RecyclePanel({ entries, onError, onRefresh }: Props) {
           </tbody>
         </table>
       )}
-    </section>
+    </div>
   );
 }
