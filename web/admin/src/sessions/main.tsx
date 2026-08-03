@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { FeedbackProvider } from '../shared/ui/feedback';
 import { App } from './App';
 import './styles.css';
 
@@ -8,6 +9,8 @@ if (!root) throw new Error('missing #root');
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <FeedbackProvider>
+      <App />
+    </FeedbackProvider>
   </StrictMode>,
 );

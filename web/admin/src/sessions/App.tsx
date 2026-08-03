@@ -4,13 +4,14 @@ import {
   seedTokenFromQuery,
   setToken,
 } from '../shared/api';
+import { useFeedback } from '../shared/ui/feedback';
 import { BindPage } from './components/Bind';
 import { DetailPage } from './components/SessionTranscript';
 import { OverviewPage } from './components/Overview';
 import { SearchPage } from './components/Search';
 
 type Route =
-  | { kind: 'overview' }
+  | { kind: 'overview'; params: URLSearchParams }
   | { kind: 'search'; params: URLSearchParams }
   | { kind: 'bind' }
   | { kind: 'detail'; uri: string };
@@ -25,7 +26,8 @@ function parseRoute(): Route {
     return { kind: 'search', params: new URLSearchParams(qs) };
   }
   if (h.startsWith('#/bind')) return { kind: 'bind' };
-  return { kind: 'overview' };
+  const qs = h.includes('?') ? h.slice(h.indexOf('?') + 1) : '';
+  return { kind: 'overview', params: new URLSearchParams(qs) };
 }
 
 function navClass(active: boolean): string {
@@ -33,6 +35,7 @@ function navClass(active: boolean): string {
 }
 
 export function App() {
+  const { toast } = useFeedback();
   const [route, setRoute] = useState<Route>(() => parseRoute());
   const [tokenDraft, setTokenDraft] = useState('');
   const [notice, setNotice] = useState('');
@@ -54,13 +57,18 @@ export function App() {
   }, []);
 
   const onNotice = useCallback((msg: string) => setNotice(msg), []);
-  const onError = useCallback((err: unknown) => {
-    if (!err) {
-      setError('');
-      return;
-    }
-    setError(String((err as Error).message || err));
-  }, []);
+  const onError = useCallback(
+    (err: unknown) => {
+      if (!err) {
+        setError('');
+        return;
+      }
+      const text = String((err as Error).message || err);
+      setError(text);
+      toast(text, { kind: 'err' });
+    },
+    [toast],
+  );
 
   const active = useMemo(() => {
     if (route.kind === 'search') return 'search';
@@ -70,7 +78,7 @@ export function App() {
   }, [route]);
 
   return (
-    <div className="app-shell">
+    <div className="app-shell sessions-shell">
       <header className="topbar">
         <div>
           <h1>会话管理</h1>
@@ -104,9 +112,11 @@ export function App() {
         </label>
         <button
           type="button"
+          className="primary"
           onClick={() => {
             setToken(tokenDraft);
             setNotice('Token 已保存');
+            toast('Token 已保存', { kind: 'ok' });
             setRoute(parseRoute());
           }}
         >
@@ -120,7 +130,11 @@ export function App() {
       </div>
 
       {route.kind === 'overview' && (
-        <OverviewPage onNotice={onNotice} onError={onError} />
+        <OverviewPage
+          params={route.params}
+          onNotice={onNotice}
+          onError={onError}
+        />
       )}
       {route.kind === 'search' && (
         <SearchPage
@@ -136,7 +150,7 @@ export function App() {
         <DetailPage uri={route.uri} onError={onError} />
       )}
 
-      <p className="err">{error}</p>
+      {error ? <p className="err">{error}</p> : null}
     </div>
   );
 }

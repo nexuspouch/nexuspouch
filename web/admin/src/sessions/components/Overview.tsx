@@ -10,20 +10,31 @@ import type { SessionRow } from '../types';
 import { SessionTranscript } from './SessionTranscript';
 
 export function OverviewPage({
+  params,
   onNotice,
   onError,
 }: {
+  params: URLSearchParams;
   onNotice: (msg: string) => void;
   onError: (err: unknown) => void;
 }) {
-  const [device, setDevice] = useState('');
+  const initialUri = params.get('uri') || '';
+  const [device, setDevice] = useState(params.get('device') || '');
   const [filter, setFilter] = useState('');
+  const [agentFilter, setAgentFilter] = useState('');
   const [devices, setDevices] = useState<string[]>([]);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialUri || null);
+
+  useEffect(() => {
+    const uri = params.get('uri') || '';
+    if (uri) setSelected(uri);
+    const d = params.get('device') || '';
+    if (d) setDevice(d);
+  }, [params]);
 
   const load = async (dev?: string) => {
     setLoading(true);
@@ -41,12 +52,13 @@ export function OverviewPage({
       setSessions(out.sessions || []);
       setTotal(out.total || 0);
       setTruncated(!!out.truncated);
-      if (
-        selected &&
-        !(out.sessions || []).some((s) => s.uri === selected)
-      ) {
-        setSelected(null);
-      }
+      const list = out.sessions || [];
+      setSelected((prev) => {
+        if (prev && list.some((s) => s.uri === prev)) return prev;
+        const want = params.get('uri');
+        if (want && list.some((s) => s.uri === want)) return want;
+        return prev && list.some((s) => s.uri === prev) ? prev : null;
+      });
     } catch (e) {
       onError(e);
     } finally {
@@ -59,10 +71,19 @@ export function OverviewPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device]);
 
+  const agents = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of sessions) {
+      if (s.agent) set.add(s.agent);
+    }
+    return [...set].sort();
+  }, [sessions]);
+
   const filtered = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    if (!f) return sessions;
     return sessions.filter((s) => {
+      if (agentFilter && (s.agent || '') !== agentFilter) return false;
+      if (!f) return true;
       const hay = [
         s.title,
         s.agent,
@@ -76,7 +97,7 @@ export function OverviewPage({
         .toLowerCase();
       return hay.includes(f);
     });
-  }, [sessions, filter]);
+  }, [sessions, filter, agentFilter]);
 
   const groups = useMemo(() => {
     const map: Record<string, SessionRow[]> = {};
@@ -92,15 +113,26 @@ export function OverviewPage({
     return order.map((a) => ({ agent: a, items: map[a] }));
   }, [filtered]);
 
+  function selectSession(uri: string) {
+    setSelected(uri);
+    const p = new URLSearchParams();
+    p.set('uri', uri);
+    if (device) p.set('device', device);
+    const next = `#/?${p}`;
+    if (location.hash !== next) {
+      history.replaceState(null, '', next);
+    }
+  }
+
   return (
-    <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
-      <div className="toolbar" style={{ padding: '12px 14px', margin: 0 }}>
+    <div className="panel overview-panel">
+      <div className="toolbar overview-toolbar">
         <div className="left">
           <input
             placeholder="筛选标题 / agent / project…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            style={{ minWidth: '14rem' }}
+            className="overview-filter"
           />
           <select
             value={device}
@@ -120,11 +152,21 @@ export function OverviewPage({
           </span>
         </div>
         <div className="right">
-          {filter && (
-            <button type="button" className="ghost" onClick={() => setFilter('')}>
+          {(filter || agentFilter) && (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                setFilter('');
+                setAgentFilter('');
+              }}
+            >
               清除
             </button>
           )}
+          <a className="btn-link" href="#/search">
+            去搜索
+          </a>
           <button
             type="button"
             onClick={() => void load(device)}
@@ -135,10 +177,38 @@ export function OverviewPage({
         </div>
       </div>
 
+      {truncated ? (
+        <div className="banner show truncate-banner" role="status">
+          列表已截断（共 {total}）。按设备过滤可看全量，或用{' '}
+          <a href="#/search">搜索</a> 精确定位。
+        </div>
+      ) : null}
+
+      {agents.length > 1 ? (
+        <div className="agent-chips" role="list">
+          <button
+            type="button"
+            className={!agentFilter ? 'chip active' : 'chip'}
+            onClick={() => setAgentFilter('')}
+          >
+            全部
+          </button>
+          {agents.map((a) => (
+            <button
+              key={a}
+              type="button"
+              className={agentFilter === a ? 'chip active' : 'chip'}
+              onClick={() => setAgentFilter(agentFilter === a ? '' : a)}
+            >
+              {a}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {!loading && !sessions.length ? (
         <div className="empty">
-          暂无会话。请先{' '}
-          <a href="#/bind">绑定 agent 会话目录</a>
+          暂无会话。请先 <a href="#/bind">绑定 agent 会话目录</a>
           ，同步后会出现在这里。
         </div>
       ) : (
@@ -156,9 +226,11 @@ export function OverviewPage({
                     className={
                       'session-item' + (selected === s.uri ? ' selected' : '')
                     }
-                    onClick={() => setSelected(s.uri)}
+                    onClick={() => selectSession(s.uri)}
                   >
-                    <div className="title">{s.title || s.session_id || s.uri}</div>
+                    <div className="title">
+                      {s.title || s.session_id || s.uri}
+                    </div>
                     <div className="meta">
                       <span>{s.project || '—'}</span>
                       <span>{fmtRelative(s.mtime || 0)}</span>

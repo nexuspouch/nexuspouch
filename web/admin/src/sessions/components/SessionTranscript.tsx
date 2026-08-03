@@ -121,7 +121,7 @@ export function SessionTranscript({
       {(detail.turns || []).map((t, i) =>
         t.role === 'tool' ? (
           <details className="tool" key={i}>
-            <summary>🔧 {toolName(t.content || '')}</summary>
+            <summary>tool · {toolName(t.content || '')}</summary>
             <pre>{t.content || ''}</pre>
           </details>
         ) : (
@@ -153,10 +153,13 @@ export function DetailPage({
   uri: string;
   onError: (err: unknown) => void;
 }) {
+  const backHref = `#/?uri=${encodeURIComponent(uri)}`;
   return (
     <div className="panel">
-      <p style={{ marginTop: 0 }}>
-        <a href="#/">← 返回总览</a>
+      <p style={{ marginTop: 0 }} className="detail-back">
+        <a href={backHref}>← 返回总览</a>
+        <span className="hint"> · </span>
+        <a href="#/search">搜索</a>
       </p>
       <SessionTranscript uri={uri} onError={onError} />
     </div>

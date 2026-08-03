@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../shared/api';
+import { useFeedback } from '../../shared/ui/feedback';
 import type { BindingReport, BindingRow } from '../types';
 
 const PRESETS = [
@@ -33,6 +34,7 @@ export function BindPage({
   onNotice: (msg: string) => void;
   onError: (err: unknown) => void;
 }) {
+  const { toast, confirm } = useFeedback();
   const [preset, setPreset] = useState<string>('claude-code');
   const [external, setExternal] = useState('~/.claude/projects');
   const [folder, setFolder] = useState('claude-code');
@@ -197,12 +199,13 @@ export function BindPage({
                       type="button"
                       className="danger"
                       onClick={async () => {
-                        if (
-                          !confirm(
-                            `移除绑定 ${b.folder}？已入库的会话文件不会删除。`,
-                          )
-                        )
-                          return;
+                        const ok = await confirm({
+                          title: '移除绑定',
+                          message: `移除绑定 ${b.folder}？已入库的会话文件不会删除。`,
+                          confirmLabel: '移除',
+                          danger: true,
+                        });
+                        if (!ok) return;
                         try {
                           await api('/admin/api/bindings/remove', {
                             method: 'POST',
@@ -210,6 +213,7 @@ export function BindPage({
                             body: JSON.stringify({ id: b.id }),
                           });
                           onNotice(`已移除绑定 ${b.id}`);
+                          toast(`已移除绑定 ${b.id}`, { kind: 'ok' });
                           await refresh();
                         } catch (e) {
                           onError(e);
