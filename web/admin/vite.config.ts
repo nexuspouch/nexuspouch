@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 const adminRoot = resolve(__dirname);
@@ -7,6 +8,7 @@ const sessionsRoot = resolve(adminRoot, 'sessions');
 export default defineConfig({
   root: sessionsRoot,
   base: '/admin/sessions/',
+  plugins: [react()],
   build: {
     outDir: resolve(adminRoot, 'dist/sessions'),
     emptyOutDir: true,

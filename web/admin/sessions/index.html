@@ -4,27 +4,9 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>会话管理 · Nexuspouch</title>
-  <link rel="stylesheet" href="../src/sessions/styles.css"/>
 </head>
 <body>
-  <h1>会话管理</h1>
-  <p class="muted">统一会话管理 · 本机采集 / 统一搜索 / 永不丢失 —— 这只是第一扇窗：
-    其他设备同步见设备过滤，语义回忆见搜索开关，产物 / 记忆空间见
-    <a href="/admin">管理面</a>。</p>
-  <nav class="nav">
-    <a href="#/">总览</a>
-    <a href="#/search">搜索</a>
-    <a href="#/bind">绑定目录</a>
-    <span class="muted" id="navHint"></span>
-  </nav>
-  <div class="card row">
-    <label>Token <input id="token" type="password" placeholder="admin token" style="min-width:14rem"/></label>
-    <button id="saveToken" type="button">保存</button>
-    <span class="muted">与 <a href="/admin">管理面</a> 共用 token</span>
-  </div>
-  <div id="notice" class="warn" role="alert"></div>
-  <main id="app"></main>
-  <p id="msg" class="err"></p>
-  <script type="module" src="../src/sessions/main.ts"></script>
+  <div id="root"></div>
+  <script type="module" src="../src/sessions/main.tsx"></script>
 </body>
 </html>

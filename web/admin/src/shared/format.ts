@@ -17,6 +17,17 @@ export function fmtTime(ms: number): string {
   return new Date(ms).toLocaleString();
 }
 
+export function fmtRelative(ms: number): string {
+  ms = Number(ms) || 0;
+  if (!ms) return '—';
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
+  return fmtTime(ms);
+}
+
 export function fmtDuration(ms: number | null | undefined): string {
   if (ms == null) return '—';
   ms = Number(ms) || 0;
@@ -33,4 +44,13 @@ export function toolName(content: string): string {
   const s = String(content || '');
   const i = s.indexOf(':');
   return i > 0 ? s.slice(0, i) : s.slice(0, 40);
+}
+
+export function escHtml(s: unknown): string {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
