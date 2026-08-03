@@ -1,14 +1,14 @@
 # Nexuspouch Admin UI
 
 独立前端（**React 19 + Vite + TypeScript**），视觉 token 对齐 agent-bridge
-（Catppuccin Mocha）。
+（Catppuccin Mocha）。**一个 Vite 工程、一次启动**，两个 HTML 入口：
 
-| 页面 | URL | 入口 |
-|------|-----|------|
-| 主管理面 | `/admin/` | `main/` |
-| 会话管理 | `/admin/sessions/` | `sessions/` |
+| 页面 | URL |
+|------|-----|
+| 主管理面 | `/admin/` |
+| 会话管理 | `/admin/sessions/` |
 
-Rust 检测到对应 `web/admin/dist/*/index.html` 时托管静态资源；否则回退内嵌 HTML。
+Rust 检测到 `web/admin/dist` 对应 HTML 时托管；否则回退内嵌 HTML。
 
 ## 开发
 
@@ -16,14 +16,12 @@ Rust 检测到对应 `web/admin/dist/*/index.html` 时托管静态资源；否�
 # 终端 A — 节点
 cargo run -- --root ./data --listen 127.0.0.1:8787 --no-mdns
 
-# 终端 B — 主管理面
+# 终端 B — 前端（同时服务两个页面）
 cd web/admin && npm install && npm run dev
-# → http://127.0.0.1:5173/ （API 代理到 8787）
-
-# 或会话页
-npm run dev:sessions
-# → http://127.0.0.1:5174/
 ```
+
+- 主管理面：http://127.0.0.1:5173/admin/
+- 会话管理：http://127.0.0.1:5173/admin/sessions/
 
 会话 Hash：`#/` 总览 · `#/search` · `#/bind` · `#/s/<uri>`
 
@@ -33,10 +31,8 @@ npm run dev:sessions
 cd web/admin && npm ci && npm run build
 ```
 
-产物：`web/admin/dist/main/`、`web/admin/dist/sessions/`。重启 nexuspouch 后访问：
-
-- http://127.0.0.1:8787/admin/
-- http://127.0.0.1:8787/admin/sessions/
+产物：`web/admin/dist/`（`index.html` + `sessions/` + 共享 `assets/`）。
+重启 nexuspouch 后访问节点上的 `/admin/` 与 `/admin/sessions/`。
 
 ```bash
 NEXUSPOUCH_ADMIN_STATIC=/path/to/web/admin/dist cargo run -- ...
@@ -46,12 +42,11 @@ NEXUSPOUCH_ADMIN_STATIC=/path/to/web/admin/dist cargo run -- ...
 
 ```
 web/admin/
-  main/index.html
-  sessions/index.html
-  vite.main.config.ts
-  vite.sessions.config.ts
+  index.html            # 主管理面
+  sessions/index.html   # 会话管理
+  vite.config.ts        # 统一入口
   src/shared/           # api / format / theme
-  src/main/             # 主管理面 panels
+  src/main/             # 主管理面
   src/sessions/         # 会话管理
-  dist/main|sessions/   # build 输出（gitignore）
+  dist/                 # build 输出（gitignore）
 ```

@@ -4,8 +4,9 @@ import { defineConfig } from 'vite';
 
 const adminRoot = resolve(__dirname);
 
+/** 单入口 MPA：/admin/（主管理面）+ /admin/sessions/（会话） */
 export default defineConfig({
-  root: resolve(adminRoot, 'main'),
+  root: adminRoot,
   base: '/admin/',
   plugins: [react()],
   resolve: {
@@ -14,14 +15,22 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: resolve(adminRoot, 'dist/main'),
+    outDir: resolve(adminRoot, 'dist'),
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: resolve(adminRoot, 'index.html'),
+        sessions: resolve(adminRoot, 'sessions/index.html'),
+      },
+    },
   },
   server: {
     port: 5173,
     proxy: {
-      '/admin/api': { target: 'http://127.0.0.1:8787', changeOrigin: true },
-      '/admin/sessions': { target: 'http://127.0.0.1:8787', changeOrigin: true },
+      '/admin/api': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
     },
   },
 });

@@ -1,8 +1,7 @@
 //! Serve built admin SPA from `web/admin/dist/*` (see `web/admin/README.md`).
 //!
 //! Resolution: `NEXUSPOUCH_ADMIN_STATIC` → `web/admin/dist` (manifest or cwd).
-//! Main UI assets are served at `/admin/assets/*` (Vite `base: '/admin/'`).
-//! Sessions SPA remains under `/admin/sessions/`.
+//! Single Vite MPA: `index.html` + `sessions/index.html`, shared `/admin/assets/*`.
 
 use axum::{
     body::Body,
@@ -13,7 +12,7 @@ use axum::{
 use std::path::PathBuf;
 use tower_http::services::{ServeDir, ServeFile};
 
-const MAIN_INDEX: &str = "main/index.html";
+const MAIN_INDEX: &str = "index.html";
 const SESSIONS_INDEX: &str = "sessions/index.html";
 
 pub struct AdminStatic {
@@ -51,6 +50,11 @@ impl AdminStatic {
 
     pub fn router(&self) -> axum::Router {
         let mut r = axum::Router::new();
+        let assets = self.root.join("assets");
+        if assets.is_dir() {
+            // Shared by both HTML entries (Vite MPA).
+            r = r.nest_service("/admin/assets", ServeDir::new(assets));
+        }
         if self.has_main {
             r = r.merge(self.main_router());
         }
@@ -61,19 +65,13 @@ impl AdminStatic {
     }
 
     fn main_router(&self) -> axum::Router {
-        let dir = self.root.join("main");
-        let index = dir.join("index.html");
-        let assets = dir.join("assets");
-        let mut r = axum::Router::new()
+        let index = self.root.join(MAIN_INDEX);
+        axum::Router::new()
             .route(
                 "/admin",
                 get(|| async { Redirect::permanent("/admin/") }),
             )
-            .route_service("/admin/", ServeFile::new(index));
-        if assets.is_dir() {
-            r = r.nest_service("/admin/assets", ServeDir::new(assets));
-        }
-        r
+            .route_service("/admin/", ServeFile::new(index))
     }
 
     fn sessions_router(&self) -> axum::Router {
