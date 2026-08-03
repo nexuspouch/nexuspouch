@@ -3,22 +3,29 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 const adminRoot = resolve(__dirname);
-const sessionsRoot = resolve(adminRoot, 'sessions');
 
 export default defineConfig({
-  root: sessionsRoot,
+  root: resolve(adminRoot, 'sessions'),
   base: '/admin/sessions/',
   plugins: [react()],
+  resolve: {
+    alias: {
+      '@shared': resolve(adminRoot, 'src/shared'),
+    },
+  },
   build: {
     outDir: resolve(adminRoot, 'dist/sessions'),
     emptyOutDir: true,
   },
   server: {
-    port: 5173,
+    port: 5174,
     proxy: {
-      '/admin/api': {
+      '/admin/api': { target: 'http://127.0.0.1:8787', changeOrigin: true },
+      '/admin': {
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
+        bypass: (req) =>
+          req.url?.startsWith('/admin/sessions') ? req.url : undefined,
       },
     },
   },

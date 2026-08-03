@@ -8,7 +8,7 @@ pub mod ui;
 use axum::{
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -65,15 +65,25 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .with_state(state.clone());
 
     let mut app = Router::new()
-        .route("/admin", get(ui_page))
-        .route("/admin/", get(ui_page))
         .nest("/admin/api", api)
         .with_state(state);
 
     if let Some(st) = static_files::AdminStatic::discover() {
         app = app.merge(st.router());
+        if !st.has_main {
+            app = app
+                .route("/admin", get(ui_page_legacy))
+                .route("/admin/", get(ui_page_legacy));
+        }
+        if !st.has_sessions {
+            app = app
+                .route("/admin/sessions", get(sessions_page_legacy))
+                .route("/admin/sessions/", get(sessions_page_legacy));
+        }
     } else {
         app = app
+            .route("/admin", get(ui_page_legacy))
+            .route("/admin/", get(ui_page_legacy))
             .route("/admin/sessions", get(sessions_page_legacy))
             .route("/admin/sessions/", get(sessions_page_legacy));
     }
@@ -83,8 +93,8 @@ pub fn router(state: Arc<AdminState>) -> Router {
 
 /// HTML shells are always served so the browser can show the token form.
 /// `/admin/api/*` remains authenticated.
-async fn ui_page() -> Response {
-    Html(ui::HTML).into_response()
+async fn ui_page_legacy() -> Response {
+    static_files::fallback_embedded_main()
 }
 
 async fn sessions_page_legacy() -> Response {

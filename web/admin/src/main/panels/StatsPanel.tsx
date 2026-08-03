@@ -1,0 +1,152 @@
+import { api } from '../../shared/api';
+import { fmtBytes, shortId } from '../../shared/format';
+
+type Props = {
+  statsJson: string;
+  masterLabel: string;
+  devices: Record<string, Record<string, number>>;
+  selfId: string;
+  onError: (e: unknown) => void;
+  onRefresh: () => Promise<void>;
+};
+
+export function StatsPanel({
+  statsJson,
+  masterLabel,
+  devices,
+  selfId,
+  onError,
+  onRefresh,
+}: Props) {
+  const ids = Object.keys(devices);
+
+  async function promoteMaster() {
+    if (
+      !confirm(
+        '将本节点升为 master？在线会话会收到 master.pointer；离线端上线后经 pointer.query 改指。旧 master 不可达时可能有镜像缺口。',
+      )
+    ) {
+      return;
+    }
+    try {
+      const out = await api<{
+        master?: string;
+        epoch?: number;
+        broadcast_peers?: number;
+        seeded_files?: number;
+        old_master_reachable?: boolean;
+        dial_error?: string;
+        hash_gate?: { ran?: boolean; mismatch_count?: number; ok?: boolean };
+      }>('/admin/api/master/migrate', { method: 'POST' });
+      alert(
+        `已升主：${shortId(out.master || '')} · epoch ${out.epoch} · 推送 ${
+          out.broadcast_peers || 0
+        } · 种子文件 ${out.seeded_files || 0}${
+          out.old_master_reachable ? '（旧 master 在线）' : '（旧 master 未在线）'
+        }${out.dial_error ? ` · 拨号失败: ${out.dial_error}` : ''}${
+          out.hash_gate?.ran
+            ? ` · 哈希门闩 mismatches=${out.hash_gate.mismatch_count || 0}${
+                out.hash_gate.ok ? ' ok' : ' 有缺口'
+              }`
+            : ''
+        }`,
+      );
+      await onRefresh();
+    } catch (e) {
+      onError(e);
+    }
+  }
+
+  async function runGc() {
+    try {
+      const out = await api<{ staging_removed?: number; recycle_bytes?: number }>(
+        '/admin/api/gc',
+        { method: 'POST' },
+      );
+      alert(
+        `GC 完成：staging 清理 ${out.staging_removed || 0} 个，回收站释放 ${fmtBytes(
+          Number(out.recycle_bytes),
+        )}`,
+      );
+      await onRefresh();
+    } catch (e) {
+      onError(e);
+    }
+  }
+
+  async function purgeDev(id: string) {
+    if (!confirm(`永久删除设备 ${shortId(id)} 的镜像？不可还原。`)) return;
+    try {
+      await api('/admin/api/devices/purge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_id: id }),
+      });
+      await onRefresh();
+    } catch (e) {
+      onError(e);
+    }
+  }
+
+  return (
+    <section className="panel">
+      <h2>用量 stats</h2>
+      <div className="row" style={{ justifyContent: 'space-between', margin: '0.5rem 0' }}>
+        <span className="muted">{masterLabel}</span>
+        <button type="button" onClick={() => void promoteMaster()}>
+          升为本机 master
+        </button>
+      </div>
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+        <span className="muted">
+          启动时会自动 GC；也可手动触发。升主时若旧 master 未入站会按配对端点主动拨号再
+          seed；并 fanout master.pointer。离线端靠重连 query 改指。
+        </span>
+        <button type="button" onClick={() => void runGc()}>
+          GC staging/回收站
+        </button>
+      </div>
+      <pre className="block">{statsJson}</pre>
+
+      <h3 className="subhead">设备镜像</h3>
+      <p className="muted">永久删除他端镜像目录（不可进回收站；禁删本机）。</p>
+      {!ids.length ? (
+        <p className="muted">无设备目录</p>
+      ) : (
+        <table className="data">
+          <thead>
+            <tr>
+              <th>device</th>
+              <th>占用</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {ids.map((id) => {
+              const spaces = devices[id] || {};
+              let total = 0;
+              for (const k of Object.keys(spaces)) total += Number(spaces[k]) || 0;
+              const isSelf = id === selfId;
+              return (
+                <tr key={id}>
+                  <td>
+                    {shortId(id)}
+                    {isSelf ? <span className="muted"> (本机)</span> : null}
+                  </td>
+                  <td>{fmtBytes(total)}</td>
+                  <td>
+                    {!isSelf ? (
+                      <button type="button" className="danger" onClick={() => void purgeDev(id)}>
+                        删除镜像
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}

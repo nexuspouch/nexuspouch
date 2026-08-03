@@ -4,9 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "dev": "vite --config vite.main.config.ts",
+    "dev:sessions": "vite --config vite.sessions.config.ts",
+    "build": "tsc --noEmit && npm run build:main && npm run build:sessions",
+    "build:main": "vite build --config vite.main.config.ts",
+    "build:sessions": "vite build --config vite.sessions.config.ts",
+    "preview": "vite preview --config vite.main.config.ts"
   },
   "dependencies": {
     "react": "^19.1.0",
