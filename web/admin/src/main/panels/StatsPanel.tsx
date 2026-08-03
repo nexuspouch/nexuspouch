@@ -1,8 +1,12 @@
 import { api } from '../../shared/api';
 import { fmtBytes, shortId } from '../../shared/format';
 import { useFeedback } from '../../shared/ui/feedback';
+import { DataTable } from '../../shared/ui/DataTable';
+import { StatusPill } from '../../shared/ui/StatusPill';
+import type { Stats } from '../types';
 
 type Props = {
+  stats: Stats | null;
   statsJson: string;
   masterLabel: string;
   devices: Record<string, Record<string, number>>;
@@ -10,9 +14,11 @@ type Props = {
   onError: (e: unknown) => void;
   onRefresh: () => Promise<void>;
   onGoStorage?: () => void;
+  onStartCleanup?: () => void;
 };
 
 export function StatsPanel({
+  stats,
   statsJson,
   masterLabel,
   devices,
@@ -20,9 +26,12 @@ export function StatsPanel({
   onError,
   onRefresh,
   onGoStorage,
+  onStartCleanup,
 }: Props) {
   const { toast, confirm } = useFeedback();
   const ids = Object.keys(devices);
+  const usedPct = Math.round((Number(stats?.volume_used_ratio) || 0) * 100);
+  const isMaster = !!stats && (stats.master || '') === selfId;
 
   async function promoteMaster() {
     const ok = await confirm({
@@ -108,11 +117,23 @@ export function StatsPanel({
     }
   }
 
+  const deviceRows = ids.map((id) => {
+    const spaces = devices[id] || {};
+    let total = 0;
+    for (const k of Object.keys(spaces)) total += Number(spaces[k]) || 0;
+    return { id, total, isSelf: id === selfId };
+  });
+
   return (
     <section className="panel">
       <div className="section-head">
         <h2>用量与 master</h2>
         <div className="row">
+          {onStartCleanup ? (
+            <button type="button" onClick={onStartCleanup}>
+              清理向导
+            </button>
+          ) : null}
           <button type="button" onClick={() => void runGc()}>
             GC
           </button>
@@ -121,9 +142,44 @@ export function StatsPanel({
           </button>
         </div>
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>
-        {masterLabel}
-      </p>
+
+      <div className="stat-cards">
+        <div className="stat-card">
+          <div className="stat-label">卷用量</div>
+          <div className="stat-value">
+            {stats ? `${usedPct}%` : '—'}
+          </div>
+          <div className="stat-sub">
+            {stats
+              ? `剩余 ${fmtBytes(Number(stats.volume_free_bytes))} / ${fmtBytes(
+                  Number(stats.volume_total_bytes),
+                )}`
+              : '加载中'}
+          </div>
+          {stats?.volume_warn ? (
+            <StatusPill tone="warn">告警</StatusPill>
+          ) : (
+            <StatusPill tone="ok">正常</StatusPill>
+          )}
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Master</div>
+          <div className="stat-value mono">
+            {shortId(stats?.master || '') || '—'}
+          </div>
+          <div className="stat-sub">{masterLabel}</div>
+          <StatusPill tone={isMaster ? 'ok' : 'accent'}>
+            {isMaster ? '本机' : '远端'}
+          </StatusPill>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">设备镜像</div>
+          <div className="stat-value">{ids.length}</div>
+          <div className="stat-sub">含本机与已同步镜像</div>
+          <StatusPill>{selfId ? shortId(selfId) : '—'}</StatusPill>
+        </div>
+      </div>
+
       <p className="muted">
         启动时会自动 GC。升主时若旧 master 未入站会按配对端点拨号再 seed，并 fanout
         master.pointer；离线端靠重连 query 改指。
@@ -131,47 +187,42 @@ export function StatsPanel({
 
       <h3 className="subhead">设备镜像</h3>
       <p className="muted">永久删除他端镜像目录（不可进回收站；禁删本机）。</p>
-      {!ids.length ? (
-        <p className="muted">无设备目录</p>
-      ) : (
-        <table className="data">
-          <thead>
-            <tr>
-              <th>device</th>
-              <th>占用</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {ids.map((id) => {
-              const spaces = devices[id] || {};
-              let total = 0;
-              for (const k of Object.keys(spaces)) total += Number(spaces[k]) || 0;
-              const isSelf = id === selfId;
-              return (
-                <tr key={id}>
-                  <td>
-                    {shortId(id)}
-                    {isSelf ? <span className="muted"> (本机)</span> : null}
-                  </td>
-                  <td>{fmtBytes(total)}</td>
-                  <td>
-                    {!isSelf ? (
-                      <button
-                        type="button"
-                        className="danger"
-                        onClick={() => void purgeDev(id)}
-                      >
-                        删除镜像
-                      </button>
-                    ) : null}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
+      <DataTable
+        rows={deviceRows}
+        rowKey={(r) => r.id}
+        empty="无设备目录"
+        columns={[
+          {
+            key: 'device',
+            header: 'device',
+            render: (r) => (
+              <>
+                {shortId(r.id)}
+                {r.isSelf ? <span className="muted"> (本机)</span> : null}
+              </>
+            ),
+          },
+          {
+            key: 'size',
+            header: '占用',
+            render: (r) => fmtBytes(r.total),
+          },
+          {
+            key: 'actions',
+            header: '',
+            render: (r) =>
+              !r.isSelf ? (
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => void purgeDev(r.id)}
+                >
+                  删除镜像
+                </button>
+              ) : null,
+          },
+        ]}
+      />
 
       <details className="raw-details">
         <summary>原始 stats JSON</summary>

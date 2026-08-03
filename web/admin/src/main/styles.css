@@ -202,3 +202,116 @@ pre.block {
 .raw-details[open] summary {
   color: var(--text);
 }
+
+.wizard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+}
+.wizard-steps li {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  color: var(--faint);
+  font-size: 0.85rem;
+}
+.wizard-steps li.current {
+  color: var(--text);
+  font-weight: 650;
+}
+.wizard-steps li.done {
+  color: var(--ok);
+}
+.wizard-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.wizard-steps li.current .wizard-num {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.wizard-steps li.done .wizard-num {
+  border-color: color-mix(in srgb, var(--ok) 50%, var(--border));
+  color: var(--ok);
+}
+.wizard-body {
+  margin-top: 0.85rem;
+}
+.pair-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.75rem;
+  margin: 0.75rem 0;
+  font-size: 0.88rem;
+}
+.pair-meta dt {
+  color: var(--faint);
+}
+.pair-meta dd {
+  margin: 0;
+}
+
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.65rem;
+  margin: 0.75rem 0 1rem;
+}
+.stat-card {
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: flex-start;
+}
+.stat-label {
+  color: var(--faint);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.stat-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.stat-sub {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.badge.status-pill.tone-ok {
+  border-color: color-mix(in srgb, var(--ok) 50%, var(--border));
+  color: var(--ok);
+}
+.badge.status-pill.tone-warn {
+  border-color: color-mix(in srgb, var(--warn) 50%, var(--border));
+  color: var(--warn);
+}
+.badge.status-pill.tone-danger {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  color: var(--danger);
+}
+.badge.status-pill.tone-accent {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--accent);
+}
+
+.cleanup-wizard {
+  margin-bottom: 14px;
+}

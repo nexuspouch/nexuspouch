@@ -40,7 +40,11 @@ export type ImportGrant = {
 
 export type BrowseEntry = {
   path?: string;
+  name?: string;
   size?: number;
+  is_dir?: boolean;
+  sha256?: string;
+  mtime?: number;
 };
 
 export type MdnsPeer = {

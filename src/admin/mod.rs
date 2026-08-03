@@ -458,6 +458,7 @@ async fn versions_overview(State(state): State<Arc<AdminState>>, headers: Header
 struct SessionsOverviewQuery {
     device: Option<String>,
     limit: Option<usize>,
+    offset: Option<usize>,
 }
 
 async fn sessions_overview(
@@ -470,6 +471,7 @@ async fn sessions_overview(
             &s.store,
             q.device.as_deref(),
             q.limit.unwrap_or(0),
+            q.offset.unwrap_or(0),
             &s.sessions_cache,
         )
     })

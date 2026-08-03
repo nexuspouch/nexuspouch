@@ -9,6 +9,8 @@ import {
 import type { SessionRow } from '../types';
 import { SessionTranscript } from './SessionTranscript';
 
+const PAGE_SIZE = 100;
+
 export function OverviewPage({
   params,
   onNotice,
@@ -25,8 +27,9 @@ export function OverviewPage({
   const [devices, setDevices] = useState<string[]>([]);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [truncated, setTruncated] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selected, setSelected] = useState<string | null>(initialUri || null);
 
   useEffect(() => {
@@ -36,38 +39,46 @@ export function OverviewPage({
     if (d) setDevice(d);
   }, [params]);
 
-  const load = async (dev?: string) => {
-    setLoading(true);
+  const load = async (dev?: string, offset = 0, append = false) => {
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     onError('');
     try {
       const q = new URLSearchParams();
       if (dev) q.set('device', dev);
+      q.set('limit', String(PAGE_SIZE));
+      q.set('offset', String(offset));
       const out = await api<{
         devices?: string[];
         total?: number;
         truncated?: boolean;
+        has_more?: boolean;
         sessions?: SessionRow[];
-      }>('/admin/api/sessions/overview' + (q.size ? `?${q}` : ''));
+      }>(`/admin/api/sessions/overview?${q}`);
       setDevices(out.devices || []);
-      setSessions(out.sessions || []);
-      setTotal(out.total || 0);
-      setTruncated(!!out.truncated);
       const list = out.sessions || [];
-      setSelected((prev) => {
-        if (prev && list.some((s) => s.uri === prev)) return prev;
-        const want = params.get('uri');
-        if (want && list.some((s) => s.uri === want)) return want;
-        return prev && list.some((s) => s.uri === prev) ? prev : null;
+      setSessions((prev) => {
+        const next = append ? [...prev, ...list] : list;
+        setSelected((sel) => {
+          if (sel && next.some((s) => s.uri === sel)) return sel;
+          const want = params.get('uri');
+          if (want && next.some((s) => s.uri === want)) return want;
+          return null;
+        });
+        return next;
       });
+      setTotal(out.total || 0);
+      setHasMore(!!out.has_more);
     } catch (e) {
       onError(e);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
   useEffect(() => {
-    void load(device);
+    void load(device, 0, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device]);
 
@@ -147,8 +158,8 @@ export function OverviewPage({
             ))}
           </select>
           <span className="hint">
-            显示 {filtered.length}/{total}
-            {truncated ? '（已截断）' : ''}
+            已加载 {sessions.length}/{total}
+            {hasMore ? '（还有更多）' : ''}
           </span>
         </div>
         <div className="right">
@@ -169,7 +180,7 @@ export function OverviewPage({
           </a>
           <button
             type="button"
-            onClick={() => void load(device)}
+            onClick={() => void load(device, 0, false)}
             disabled={loading}
           >
             {loading ? '加载中…' : '刷新'}
@@ -177,9 +188,9 @@ export function OverviewPage({
         </div>
       </div>
 
-      {truncated ? (
+      {hasMore ? (
         <div className="banner show truncate-banner" role="status">
-          列表已截断（共 {total}）。按设备过滤可看全量，或用{' '}
+          已显示 {sessions.length} / {total}。可继续加载，或用{' '}
           <a href="#/search">搜索</a> 精确定位。
         </div>
       ) : null}
@@ -245,6 +256,17 @@ export function OverviewPage({
             {!loading && !filtered.length && (
               <div className="empty">没有匹配的会话</div>
             )}
+            {hasMore ? (
+              <div className="load-more">
+                <button
+                  type="button"
+                  disabled={loadingMore}
+                  onClick={() => void load(device, sessions.length, true)}
+                >
+                  {loadingMore ? '加载中…' : '加载更多'}
+                </button>
+              </div>
+            ) : null}
           </div>
           <div className="detail-pane">
             {selected ? (

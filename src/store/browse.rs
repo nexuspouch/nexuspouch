@@ -306,6 +306,26 @@ pub fn admin_list(
     space: &str,
     path: &str,
 ) -> Result<Map<String, Value>, OpError> {
+    admin_list_mode(local, device, space, path, false)
+}
+
+/// Shallow directory listing for the admin browse UI (`is_dir` on each entry).
+pub fn admin_list_shallow(
+    local: &Local,
+    device: &str,
+    space: &str,
+    path: &str,
+) -> Result<Map<String, Value>, OpError> {
+    admin_list_mode(local, device, space, path, true)
+}
+
+fn admin_list_mode(
+    local: &Local,
+    device: &str,
+    space: &str,
+    path: &str,
+    shallow: bool,
+) -> Result<Map<String, Value>, OpError> {
     if !protocol::is_valid_device_id(device) {
         return Err(OpError::new("bad_path", "invalid device id"));
     }
@@ -334,20 +354,89 @@ pub fn admin_list(
                 "size": size,
                 "sha256": sha256,
                 "mtime": mtime_ms(&st),
+                "is_dir": false,
             }]),
         )]));
     }
+
+    if shallow {
+        let base = if path.is_empty() {
+            String::new()
+        } else {
+            protocol::normalize_path(path).unwrap_or_else(|_| path.to_string())
+        };
+        let mut entries = Vec::new();
+        let read_dir = match fs::read_dir(&dir) {
+            Ok(d) => d,
+            Err(_) => {
+                return Ok(Map::from_iter([("entries".into(), json!([]))]));
+            }
+        };
+        let mut kids: Vec<(String, std::fs::DirEntry, fs::Metadata)> = Vec::new();
+        for entry in read_dir.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || name == ".staging" {
+                continue;
+            }
+            let meta = match entry.metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            kids.push((name, entry, meta));
+        }
+        kids.sort_by(|a, b| {
+            let a_dir = a.2.is_dir();
+            let b_dir = b.2.is_dir();
+            b_dir.cmp(&a_dir).then_with(|| a.0.cmp(&b.0))
+        });
+        for (name, entry, meta) in kids {
+            let rel = if base.is_empty() {
+                name.clone()
+            } else {
+                format!("{base}/{name}")
+            };
+            if meta.is_dir() {
+                entries.push(Map::from_iter([
+                    ("path".into(), json!(rel)),
+                    ("name".into(), json!(name)),
+                    ("size".into(), json!(dir_size(&entry.path(), true))),
+                    ("mtime".into(), json!(mtime_ms(&meta))),
+                    ("is_dir".into(), json!(true)),
+                ]));
+            } else {
+                let (sha256, size) = file_sha(&entry.path());
+                entries.push(Map::from_iter([
+                    ("path".into(), json!(rel)),
+                    ("name".into(), json!(name)),
+                    ("size".into(), json!(size)),
+                    ("sha256".into(), json!(sha256)),
+                    ("mtime".into(), json!(mtime_ms(&meta))),
+                    ("is_dir".into(), json!(false)),
+                ]));
+            }
+        }
+        return Ok(Map::from_iter([("entries".into(), json!(entries))]));
+    }
+
     let mut entries = Vec::new();
     walk_files(&dir, &dir, &mut entries, usize::MAX)?;
     if !path.is_empty() {
         if let Ok(base) = protocol::normalize_path(path) {
             for e in &mut entries {
                 if let Some(p) = e.get_mut("path").and_then(|v| v.as_str()) {
-                    let combined = format!("{}/{}", base.trim_end_matches('/'), p.trim_start_matches('/'));
-                    *e.get_mut("path").unwrap() = Value::String(combined.trim_start_matches('/').to_string());
+                    let combined = format!(
+                        "{}/{}",
+                        base.trim_end_matches('/'),
+                        p.trim_start_matches('/')
+                    );
+                    *e.get_mut("path").unwrap() =
+                        Value::String(combined.trim_start_matches('/').to_string());
                 }
             }
         }
+    }
+    for e in &mut entries {
+        e.insert("is_dir".into(), json!(false));
     }
     Ok(Map::from_iter([("entries".into(), json!(entries))]))
 }

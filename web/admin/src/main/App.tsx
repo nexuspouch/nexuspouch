@@ -4,6 +4,7 @@ import { fmtBytes, shortId } from '../shared/format';
 import { useFeedback } from '../shared/ui/feedback';
 import { AgentsPanel } from './panels/AgentsPanel';
 import { AuditPanel } from './panels/AuditPanel';
+import { CleanupWizard } from './panels/CleanupWizard';
 import { DangerPanel } from './panels/DangerPanel';
 import { DiscoveryPanel } from './panels/DiscoveryPanel';
 import { ImportPanel } from './panels/ImportPanel';
@@ -40,6 +41,8 @@ export function App() {
   const [tick, setTick] = useState(0);
   const [storageTab, setStorageTab] = useState<'browse' | 'recycle'>('browse');
   const [section, setSection] = useState<SectionId>(() => parseSection());
+  const [showCleanup, setShowCleanup] = useState(false);
+  const [cleanupAutoShown, setCleanupAutoShown] = useState(false);
 
   useEffect(() => {
     seedTokenFromQuery();
@@ -128,6 +131,24 @@ export function App() {
     [goSection],
   );
 
+  const startCleanup = useCallback(() => {
+    setShowCleanup(true);
+    goSection('overview');
+    queueMicrotask(() => {
+      document.getElementById('cleanup')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
+  }, [goSection]);
+
+  useEffect(() => {
+    if (stats?.volume_warn && !cleanupAutoShown) {
+      setShowCleanup(true);
+      setCleanupAutoShown(true);
+    }
+  }, [stats?.volume_warn, cleanupAutoShown]);
+
   const volumeWarn =
     stats?.volume_warn &&
     `卷用量告警：已用约 ${Math.round((Number(stats.volume_used_ratio) || 0) * 100)}%（剩余 ${fmtBytes(Number(stats.volume_free_bytes))} / 共 ${fmtBytes(Number(stats.volume_total_bytes))}）。请清理镜像或扩大磁盘。`;
@@ -159,6 +180,9 @@ export function App() {
         <div className="banner volume show" role="alert">
           {volumeWarn}
           <span className="banner-actions">
+            <button type="button" className="primary" onClick={startCleanup}>
+              清理向导
+            </button>
             <button type="button" onClick={() => goStorage('recycle')}>
               去回收站
             </button>
@@ -219,17 +243,32 @@ export function App() {
 
       <div className="section-body">
         {section === 'overview' ? (
-          <StatsPanel
-            statsJson={stats ? JSON.stringify(stats, null, 2) : '…'}
-            masterLabel={`master: ${shortId(masterId)} · epoch ${masterEpoch}${
-              masterId === selfId ? ' (本机)' : ''
-            }`}
-            devices={devices}
-            selfId={selfId}
-            onError={onError}
-            onRefresh={refresh}
-            onGoStorage={() => goStorage('recycle')}
-          />
+          <>
+            {showCleanup ? (
+              <CleanupWizard
+                stats={stats}
+                recycleCount={recycle.length}
+                onError={onError}
+                onRefresh={refresh}
+                onGoBrowse={() => goStorage('browse')}
+                onGoRecycle={() => goStorage('recycle')}
+                onDismiss={() => setShowCleanup(false)}
+              />
+            ) : null}
+            <StatsPanel
+              stats={stats}
+              statsJson={stats ? JSON.stringify(stats, null, 2) : '…'}
+              masterLabel={`master: ${shortId(masterId)} · epoch ${masterEpoch}${
+                masterId === selfId ? ' (本机)' : ''
+              }`}
+              devices={devices}
+              selfId={selfId}
+              onError={onError}
+              onRefresh={refresh}
+              onGoStorage={() => goStorage('recycle')}
+              onStartCleanup={startCleanup}
+            />
+          </>
         ) : null}
 
         {section === 'devices' ? (

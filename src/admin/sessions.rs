@@ -70,6 +70,7 @@ pub fn overview(
     local: &Local,
     device: Option<&str>,
     limit: usize,
+    offset: usize,
     cache: &SummaryCache,
 ) -> Result<Map<String, Value>, OpError> {
     let limit = if limit == 0 {
@@ -125,13 +126,18 @@ pub fn overview(
         })
     });
     let total = sessions.len();
-    let truncated = total > limit;
-    sessions.truncate(limit);
+    let offset = offset.min(total);
+    let end = (offset + limit).min(total);
+    let page: Vec<_> = sessions[offset..end].to_vec();
+    let has_more = end < total;
     Ok(Map::from_iter([
-        ("sessions".into(), Value::Array(sessions)),
+        ("sessions".into(), Value::Array(page)),
         ("devices".into(), json!(devices)),
         ("total".into(), json!(total)),
-        ("truncated".into(), json!(truncated)),
+        ("offset".into(), json!(offset)),
+        ("limit".into(), json!(limit)),
+        ("has_more".into(), json!(has_more)),
+        ("truncated".into(), json!(has_more)),
     ]))
 }
 
@@ -472,7 +478,7 @@ mod tests {
     fn overview_empty() {
         let (_dir, local) = open_local();
         let cache = SummaryCache::new();
-        let out = overview(&local, None, 0, &cache).unwrap();
+        let out = overview(&local, None, 0, 0, &cache).unwrap();
         assert_eq!(out["sessions"].as_array().unwrap().len(), 0);
         assert_eq!(out["total"].as_u64().unwrap(), 0);
         assert_eq!(out["truncated"].as_bool().unwrap(), false);
@@ -495,7 +501,7 @@ mod tests {
         );
 
         let cache = SummaryCache::new();
-        let out = overview(&local, None, 0, &cache).unwrap();
+        let out = overview(&local, None, 0, 0, &cache).unwrap();
         let sessions = out["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 3);
         assert_eq!(out["total"].as_u64().unwrap(), 3);
@@ -526,11 +532,11 @@ mod tests {
         assert!(acp["project"].is_null());
 
         // Device filter: valid but absent device → empty; invalid → bad_path.
-        let only_self = overview(&local, Some(DEV), 0, &cache).unwrap();
+        let only_self = overview(&local, Some(DEV), 0, 0, &cache).unwrap();
         assert_eq!(only_self["sessions"].as_array().unwrap().len(), 2);
-        let absent = overview(&local, Some("cccccccccccccccc"), 0, &cache).unwrap();
+        let absent = overview(&local, Some("cccccccccccccccc"), 0, 0, &cache).unwrap();
         assert_eq!(absent["sessions"].as_array().unwrap().len(), 0);
-        assert!(overview(&local, Some("not-a-device"), 0, &cache).is_err());
+        assert!(overview(&local, Some("not-a-device"), 0, 0, &cache).is_err());
     }
 
     #[test]
@@ -544,7 +550,7 @@ mod tests {
             );
         }
         let cache = SummaryCache::new();
-        let out = overview(&local, None, 2, &cache).unwrap();
+        let out = overview(&local, None, 2, 0, &cache).unwrap();
         assert_eq!(out["sessions"].as_array().unwrap().len(), 2);
         assert_eq!(out["total"].as_u64().unwrap(), 3);
         assert_eq!(out["truncated"].as_bool().unwrap(), true);
@@ -559,7 +565,7 @@ mod tests {
             "{\"type\":\"user\",\"timestamp\":\"2026-05-16T08:00:00.000Z\",\"message\":{\"content\":\"first topic alpha\"}}\n",
         );
         let cache = SummaryCache::new();
-        let out1 = overview(&local, None, 0, &cache).unwrap();
+        let out1 = overview(&local, None, 0, 0, &cache).unwrap();
         assert_eq!(out1["sessions"][0]["title"], "first topic alpha");
         // Rewrite with different content (size/mtime change) → fresh summary.
         write_session(
@@ -567,7 +573,7 @@ mod tests {
             "claude-code/s-1.jsonl",
             "{\"type\":\"user\",\"timestamp\":\"2026-05-16T09:00:00.000Z\",\"message\":{\"content\":\"second topic beta longer\"}}\n",
         );
-        let out2 = overview(&local, None, 0, &cache).unwrap();
+        let out2 = overview(&local, None, 0, 0, &cache).unwrap();
         assert_eq!(out2["sessions"][0]["title"], "second topic beta longer");
     }
 

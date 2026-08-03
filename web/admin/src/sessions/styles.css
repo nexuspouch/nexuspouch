@@ -206,3 +206,11 @@
   gap: 0.25rem;
   align-items: center;
 }
+
+.load-more {
+  padding: 12px 14px 16px;
+  border-top: 1px solid var(--border);
+}
+.load-more button {
+  width: 100%;
+}

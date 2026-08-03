@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../shared/api';
 import { fmtBytes, fmtRelative, shortId } from '../../shared/format';
 import { useFeedback } from '../../shared/ui/feedback';
+import { StatusPill } from '../../shared/ui/StatusPill';
 
 type AgentRow = {
   id?: string;
@@ -200,9 +201,9 @@ export function AgentsPanel({ refreshKey, onError }: Props) {
                     <div className="muted">{fmtRelative(Number(a.created_ms))}</div>
                   </td>
                   <td>
-                    <span className={`badge ${active ? 'ok' : ''}`}>
+                    <StatusPill tone={active ? 'ok' : 'default'}>
                       {a.status || '—'}
-                    </span>
+                    </StatusPill>
                   </td>
                   <td>
                     <div className="chip-row">

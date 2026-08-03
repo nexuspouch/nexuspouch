@@ -15,43 +15,6 @@ type Props = {
 
 const SPACES = ['files', 'artifacts', 'attachments', 'backups'] as const;
 
-type DirChild = { name: string; size: number };
-type FileChild = { path: string; name: string; size: number };
-
-function synthesize(
-  entries: BrowseEntry[],
-  currentPath: string,
-): { dirs: DirChild[]; files: FileChild[] } {
-  const prefix = currentPath ? `${currentPath.replace(/\/$/, '')}/` : '';
-  const dirMap = new Map<string, number>();
-  const files: FileChild[] = [];
-
-  for (const e of entries) {
-    const full = e.path || '';
-    let rest = full;
-    if (currentPath) {
-      if (full === currentPath) continue;
-      if (!full.startsWith(prefix)) continue;
-      rest = full.slice(prefix.length);
-    }
-    if (!rest) continue;
-    const slash = rest.indexOf('/');
-    const size = Number(e.size) || 0;
-    if (slash === -1) {
-      files.push({ path: full, name: rest, size });
-    } else {
-      const name = rest.slice(0, slash);
-      dirMap.set(name, (dirMap.get(name) || 0) + size);
-    }
-  }
-
-  const dirs = [...dirMap.entries()]
-    .map(([name, size]) => ({ name, size }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  files.sort((a, b) => a.name.localeCompare(b.name));
-  return { dirs, files };
-}
-
 export function BrowsePanel({
   selfId,
   deviceIds,
@@ -112,9 +75,13 @@ export function BrowsePanel({
     void loadBrowse();
   }, [loadBrowse]);
 
-  const { dirs, files } = useMemo(
-    () => synthesize(entries || [], path.trim()),
-    [entries, path],
+  const dirs = useMemo(
+    () => (entries || []).filter((e) => e.is_dir),
+    [entries],
+  );
+  const files = useMemo(
+    () => (entries || []).filter((e) => !e.is_dir),
+    [entries],
   );
 
   const crumbs = useMemo(() => {
@@ -130,13 +97,16 @@ export function BrowsePanel({
     return items;
   }, [path, space]);
 
-  const allFilePaths = useMemo(() => files.map((f) => f.path), [files]);
+  const selectable = useMemo(
+    () => (entries || []).map((e) => e.path || '').filter(Boolean),
+    [entries],
+  );
   const allSelected =
-    allFilePaths.length > 0 && allFilePaths.every((p) => selected.has(p));
+    selectable.length > 0 && selectable.every((p) => selected.has(p));
 
   function toggleAll() {
     if (allSelected) setSelected(new Set());
-    else setSelected(new Set(allFilePaths));
+    else setSelected(new Set(selectable));
   }
 
   function toggleOne(p: string) {
@@ -148,8 +118,15 @@ export function BrowsePanel({
     });
   }
 
-  function enterDir(name: string) {
-    setPath((prev) => (prev ? `${prev.replace(/\/$/, '')}/${name}` : name));
+  function enterDir(entry: BrowseEntry) {
+    setPath(entry.path || '');
+  }
+
+  function nameOf(e: BrowseEntry): string {
+    if (e.name) return e.name;
+    const p = e.path || '';
+    const i = p.lastIndexOf('/');
+    return i >= 0 ? p.slice(i + 1) : p;
   }
 
   async function deletePaths(paths: string[]) {
@@ -186,7 +163,9 @@ export function BrowsePanel({
         toast(`删除完成，${failed} 项失败`, { kind: 'err' });
       } else {
         toast(
-          paths.length === 1 ? '已移入回收站' : `已移入回收站（${paths.length}）`,
+          paths.length === 1
+            ? '已移入回收站'
+            : `已移入回收站（${paths.length}）`,
           {
             kind: 'ok',
             action: onGoRecycle
@@ -211,7 +190,7 @@ export function BrowsePanel({
   return (
     <div className="browse-pane">
       <p className="muted" style={{ marginTop: 0 }}>
-        浏览本机上的设备镜像（含已配对设备）。点目录进入，删除进回收站。
+        浅层浏览设备镜像。点目录进入；文件与目录均可删除进回收站。
       </p>
       <div className="row">
         <label>
@@ -284,7 +263,7 @@ export function BrowsePanel({
         })}
       </nav>
 
-      {entries === null || (loading && entries === null) ? (
+      {entries === null ? (
         <p className="muted">加载中…</p>
       ) : !dirs.length && !files.length ? (
         <p className="muted">此目录为空</p>
@@ -296,9 +275,9 @@ export function BrowsePanel({
                 <input
                   type="checkbox"
                   checked={allSelected}
-                  disabled={!files.length || busy}
+                  disabled={!selectable.length || busy}
                   onChange={toggleAll}
-                  aria-label="全选文件"
+                  aria-label="全选"
                 />
               </th>
               <th>名称</th>
@@ -308,43 +287,63 @@ export function BrowsePanel({
           </thead>
           <tbody>
             {dirs.map((d) => (
-              <tr key={`d:${d.name}`}>
-                <td />
-                <td>
-                  <button
-                    type="button"
-                    className="linkish"
-                    onClick={() => enterDir(d.name)}
-                  >
-                    {d.name}/
-                  </button>
-                </td>
-                <td>{fmtBytes(d.size)}</td>
-                <td />
-              </tr>
-            ))}
-            {files.map((f) => (
               <tr
-                key={`f:${f.path}`}
-                className={selected.has(f.path) ? 'selected' : undefined}
+                key={`d:${d.path}`}
+                className={selected.has(d.path || '') ? 'selected' : undefined}
               >
                 <td>
                   <input
                     type="checkbox"
-                    checked={selected.has(f.path)}
+                    checked={selected.has(d.path || '')}
                     disabled={busy}
-                    onChange={() => toggleOne(f.path)}
-                    aria-label={`选择 ${f.name}`}
+                    onChange={() => toggleOne(d.path || '')}
+                    aria-label={`选择目录 ${nameOf(d)}`}
                   />
                 </td>
-                <td className="mono">{f.name}</td>
-                <td>{fmtBytes(f.size)}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="linkish"
+                    onClick={() => enterDir(d)}
+                  >
+                    {nameOf(d)}/
+                  </button>
+                </td>
+                <td>{fmtBytes(Number(d.size))}</td>
                 <td>
                   <button
                     type="button"
                     className="danger"
                     disabled={busy}
-                    onClick={() => void deletePaths([f.path])}
+                    onClick={() => void deletePaths([d.path || ''])}
+                  >
+                    删除
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {files.map((f) => (
+              <tr
+                key={`f:${f.path}`}
+                className={selected.has(f.path || '') ? 'selected' : undefined}
+              >
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(f.path || '')}
+                    disabled={busy}
+                    onChange={() => toggleOne(f.path || '')}
+                    aria-label={`选择 ${nameOf(f)}`}
+                  />
+                </td>
+                <td className="mono">{nameOf(f)}</td>
+                <td>{fmtBytes(Number(f.size))}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="danger"
+                    disabled={busy}
+                    onClick={() => void deletePaths([f.path || ''])}
                   >
                     删除
                   </button>

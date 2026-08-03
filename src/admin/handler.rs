@@ -509,7 +509,7 @@ pub fn browse(
     let device = device.unwrap_or_else(|| state.device.clone());
     let space = space.unwrap_or_else(|| "files".into());
     let path = path.unwrap_or_default();
-    let mut data = crate::store::browse::admin_list(&state.store, &device, &space, &path)?;
+    let mut data = crate::store::browse::admin_list_shallow(&state.store, &device, &space, &path)?;
     data.insert("device".into(), json!(device));
     data.insert("space".into(), json!(space));
     data.insert("path".into(), json!(path));
