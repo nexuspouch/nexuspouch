@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../shared/api';
 
+type PubRow = { uri?: string; versions?: number };
+
 type Props = { refreshKey: number; onError?: (e: unknown) => void };
 
-export function VersionsPanel({ refreshKey }: Props) {
-  const [policy, setPolicy] = useState('…');
-  const [published, setPublished] = useState('…');
+export function VersionsPanel({ refreshKey, onError }: Props) {
+  const [keepLast, setKeepLast] = useState<number | null>(null);
+  const [keepEnv, setKeepEnv] = useState('');
+  const [published, setPublished] = useState<PubRow[] | null>(null);
+  const [err, setErr] = useState('');
 
   async function load() {
     try {
@@ -13,22 +17,16 @@ export function VersionsPanel({ refreshKey }: Props) {
         keep_last?: number;
         keep_env?: string;
         published_count?: number;
-        published?: Array<{ uri?: string; versions?: number }>;
+        published?: PubRow[];
       }>('/admin/api/versions');
-      setPolicy(
-        `keep_last=${out.keep_last} (env ${out.keep_env}) · published=${
-          out.published_count || 0
-        }`,
-      );
-      const pub = out.published || [];
-      setPublished(
-        pub.length
-          ? pub.map((p) => `${p.uri} · versions=${p.versions}`).join('\n')
-          : '(no published/protected artifacts yet)',
-      );
+      setKeepLast(out.keep_last ?? null);
+      setKeepEnv(out.keep_env || '');
+      setPublished(out.published || []);
+      setErr('');
     } catch (e) {
-      setPolicy(String((e as Error).message || e));
-      setPublished('');
+      setErr(String((e as Error).message || e));
+      setPublished([]);
+      onError?.(e);
     }
   }
 
@@ -44,14 +42,44 @@ export function VersionsPanel({ refreshKey }: Props) {
           刷新
         </button>
       </div>
-      <p className="muted">
+      <p className="muted" style={{ marginTop: 0 }}>
         全局保留：<code>NEXUSPOUCH_VERSIONS_KEEP</code>
-        （默认 10；发布/protected 产物不修剪）。下方列出已发布（protected）路径。
+        （默认 10；发布/protected 产物不修剪）。
       </p>
-      <pre className="block muted">{policy}</pre>
-      <pre className="block muted" style={{ marginTop: '0.5rem' }}>
-        {published}
-      </pre>
+      <div className="stat-chips">
+        <span className="stat-chip">
+          keep_last <strong>{keepLast ?? '—'}</strong>
+        </span>
+        <span className="stat-chip">
+          env <strong>{keepEnv || '—'}</strong>
+        </span>
+        <span className="stat-chip">
+          published <strong>{published?.length ?? 0}</strong>
+        </span>
+      </div>
+      {err ? <p className="err">{err}</p> : null}
+      {published === null ? (
+        <p className="muted">加载中…</p>
+      ) : !published.length ? (
+        <p className="muted">暂无已发布（protected）产物</p>
+      ) : (
+        <table className="data">
+          <thead>
+            <tr>
+              <th>URI</th>
+              <th>版本数</th>
+            </tr>
+          </thead>
+          <tbody>
+            {published.map((p) => (
+              <tr key={p.uri}>
+                <td className="mono">{p.uri || '—'}</td>
+                <td>{p.versions ?? 0}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }

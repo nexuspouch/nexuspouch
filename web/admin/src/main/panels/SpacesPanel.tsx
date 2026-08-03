@@ -2,49 +2,38 @@ import { useEffect, useState } from 'react';
 import { api } from '../../shared/api';
 import { useFeedback } from '../../shared/ui/feedback';
 
+type SpaceRow = {
+  name?: string;
+  builtin?: boolean;
+  well_known?: boolean;
+  visibility?: string;
+  encryption?: string;
+  retention?: string;
+  convention?: string;
+};
+
 type Props = { refreshKey: number; onError: (e: unknown) => void };
+
+function kindOf(s: SpaceRow): string {
+  if (s.builtin) return 'builtin';
+  if (s.well_known) return 'well-known';
+  return 'custom';
+}
 
 export function SpacesPanel({ refreshKey, onError }: Props) {
   const { toast } = useFeedback();
-  const [list, setList] = useState('…');
+  const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
   const [name, setName] = useState('');
   const [visibility, setVisibility] = useState('shared');
   const [busy, setBusy] = useState(false);
 
   async function load() {
     try {
-      const out = await api<{
-        spaces?: Array<{
-          name?: string;
-          builtin?: boolean;
-          well_known?: boolean;
-          visibility?: string;
-          encryption?: string;
-          retention?: string;
-          convention?: string;
-        }>;
-      }>('/admin/api/spaces');
-      const spaces = out.spaces || [];
-      setList(
-        spaces.length
-          ? spaces
-              .map((s) => {
-                const kind = s.builtin
-                  ? 'builtin'
-                  : s.well_known
-                    ? 'well-known'
-                    : 'custom';
-                let line = `${s.name} · ${kind} · ${s.visibility} · enc=${
-                  s.encryption || 'none'
-                } · ret=${s.retention || 'none'}`;
-                if (s.convention) line += ` · ${s.convention}`;
-                return line;
-              })
-              .join('\n')
-          : '(no spaces)',
-      );
+      const out = await api<{ spaces?: SpaceRow[] }>('/admin/api/spaces');
+      setSpaces(out.spaces || []);
     } catch (e) {
-      setList(String((e as Error).message || e));
+      setSpaces([]);
+      onError(e);
     }
   }
 
@@ -81,12 +70,12 @@ export function SpacesPanel({ refreshKey, onError }: Props) {
   return (
     <section className="panel">
       <div className="section-head">
-        <h2>Spaces（空间属性）</h2>
+        <h2>Spaces</h2>
         <button type="button" onClick={() => void load()}>
           刷新
         </button>
       </div>
-      <div className="row">
+      <div className="row" style={{ marginBottom: '0.75rem' }}>
         <input
           placeholder="名称（小写字母开头）"
           style={{ minWidth: '8rem' }}
@@ -109,14 +98,44 @@ export function SpacesPanel({ refreshKey, onError }: Props) {
           声明自定义空间
         </button>
       </div>
-      <pre className="block muted" style={{ marginTop: '0.5rem' }}>
-        {list}
-      </pre>
-      <p className="muted">
-        空间 = 属性驱动分区（visibility / encryption / retention /
-        import_grant）；四内置空间不可重声明。启动时自动种子{' '}
-        <code>memory</code>（蒸馏记忆，默认 private）。
+      <p className="muted" style={{ marginTop: 0 }}>
+        空间 = 属性驱动分区；四内置空间不可重声明。启动时自动种子{' '}
+        <code>memory</code>（默认 private）。
       </p>
+      {spaces === null ? (
+        <p className="muted">加载中…</p>
+      ) : !spaces.length ? (
+        <p className="muted">暂无空间</p>
+      ) : (
+        <table className="data">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>类型</th>
+              <th>可见性</th>
+              <th>加密</th>
+              <th>保留</th>
+              <th>约定</th>
+            </tr>
+          </thead>
+          <tbody>
+            {spaces.map((s) => (
+              <tr key={s.name}>
+                <td>
+                  <code>{s.name}</code>
+                </td>
+                <td>
+                  <span className="badge">{kindOf(s)}</span>
+                </td>
+                <td>{s.visibility || '—'}</td>
+                <td>{s.encryption || 'none'}</td>
+                <td>{s.retention || 'none'}</td>
+                <td className="muted">{s.convention || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }

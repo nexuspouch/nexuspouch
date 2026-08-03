@@ -28,6 +28,16 @@ export type RecycleEntry = {
   size?: number;
 };
 
+export type ImportGrant = {
+  grant_id?: string;
+  old_device?: string;
+  new_device?: string;
+  spaces?: string[];
+  issued_at?: number;
+  expires_at?: number;
+  revoked?: boolean;
+};
+
 export type BrowseEntry = {
   path?: string;
   size?: number;

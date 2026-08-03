@@ -12,7 +12,14 @@ import { SpacesPanel } from './panels/SpacesPanel';
 import { StatsPanel } from './panels/StatsPanel';
 import { StoragePanel } from './panels/StoragePanel';
 import { VersionsPanel } from './panels/VersionsPanel';
+import {
+  parseSection,
+  SECTIONS,
+  sectionHash,
+  type SectionId,
+} from './sections';
 import type {
+  ImportGrant,
   ImportRequest,
   Peer,
   RecycleEntry,
@@ -26,16 +33,34 @@ export function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [imports, setImports] = useState<ImportRequest[]>([]);
-  const [issued, setIssued] = useState('…');
-  const [received, setReceived] = useState('…');
+  const [issued, setIssued] = useState<ImportGrant[]>([]);
+  const [received, setReceived] = useState<ImportGrant[]>([]);
   const [recycle, setRecycle] = useState<RecycleEntry[]>([]);
   const [peerNames, setPeerNames] = useState<Record<string, string>>({});
   const [tick, setTick] = useState(0);
   const [storageTab, setStorageTab] = useState<'browse' | 'recycle'>('browse');
+  const [section, setSection] = useState<SectionId>(() => parseSection());
 
   useEffect(() => {
     seedTokenFromQuery();
     setTokenDraft(getToken());
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => setSection(parseSection());
+    window.addEventListener('hashchange', onHash);
+    if (!location.hash || location.hash === '#') {
+      history.replaceState(null, '', sectionHash('overview'));
+    }
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  const goSection = useCallback((id: SectionId) => {
+    if (location.hash !== sectionHash(id)) {
+      location.hash = sectionHash(id);
+    } else {
+      setSection(id);
+    }
   }, []);
 
   const onError = useCallback(
@@ -72,23 +97,15 @@ export function App() {
       );
       setImports(pending.requests || []);
 
-      const issuedOut = await api<{ grants?: unknown[] }>(
+      const issuedOut = await api<{ grants?: ImportGrant[] }>(
         '/admin/api/import/grants?role=issued',
       );
-      const issuedList = issuedOut.grants || [];
-      setIssued(
-        issuedList.length ? JSON.stringify(issuedList, null, 2) : '（无）',
-      );
+      setIssued(issuedOut.grants || []);
 
-      const receivedOut = await api<{ grants?: unknown[] }>(
+      const receivedOut = await api<{ grants?: ImportGrant[] }>(
         '/admin/api/import/grants?role=received',
       );
-      const receivedList = receivedOut.grants || [];
-      setReceived(
-        receivedList.length
-          ? JSON.stringify(receivedList, null, 2)
-          : '（无）',
-      );
+      setReceived(receivedOut.grants || []);
 
       const rec = await api<{ entries?: RecycleEntry[] }>('/admin/api/recycle');
       setRecycle(rec.entries || []);
@@ -103,13 +120,13 @@ export function App() {
     void refresh();
   }, [refresh]);
 
-  const goStorage = useCallback((tab: 'browse' | 'recycle' = 'browse') => {
-    setStorageTab(tab);
-    document.getElementById('storage')?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
-  }, []);
+  const goStorage = useCallback(
+    (tab: 'browse' | 'recycle' = 'browse') => {
+      setStorageTab(tab);
+      goSection('storage');
+    },
+    [goSection],
+  );
 
   const volumeWarn =
     stats?.volume_warn &&
@@ -120,13 +137,18 @@ export function App() {
   const masterEpoch = stats?.master_epoch ?? 0;
   const devices = stats?.devices || {};
 
+  const badges: Partial<Record<SectionId, number>> = {
+    storage: recycle.length,
+    import: imports.length,
+  };
+
   return (
     <div className="app-shell admin-main">
       <header className="topbar">
         <div>
           <h1>ShePaw Storage Admin</h1>
           <p className="sub">
-            无头节点管理面 · Noise 配对 / 浏览手删 / 用量 / 回收站 / 换机导入 ·{' '}
+            无头节点管理面 ·{' '}
             <a href="/admin/sessions/">会话管理</a> ·{' '}
             <a href="/api/v1/events/recent">最近 store 事件</a>
           </p>
@@ -147,7 +169,7 @@ export function App() {
         </div>
       ) : null}
 
-      <div className="token-bar">
+      <div className="token-bar sticky-bar">
         <label>
           Token
           <input
@@ -173,62 +195,104 @@ export function App() {
         </button>
       </div>
 
+      <nav className="nav section-nav" aria-label="管理分区">
+        {SECTIONS.map((s) => {
+          const count = badges[s.id];
+          return (
+            <a
+              key={s.id}
+              href={sectionHash(s.id)}
+              className={section === s.id ? 'active' : undefined}
+              onClick={(e) => {
+                e.preventDefault();
+                goSection(s.id);
+              }}
+            >
+              {s.label}
+              {count ? <span className="nav-count">{count}</span> : null}
+            </a>
+          );
+        })}
+      </nav>
+
       {msg ? <p className="err">{msg}</p> : null}
 
-      <PairingPanel
-        peers={peers}
-        selfId={selfId}
-        masterId={masterId}
-        onError={onError}
-        onRefresh={refresh}
-      />
+      <div className="section-body">
+        {section === 'overview' ? (
+          <StatsPanel
+            statsJson={stats ? JSON.stringify(stats, null, 2) : '…'}
+            masterLabel={`master: ${shortId(masterId)} · epoch ${masterEpoch}${
+              masterId === selfId ? ' (本机)' : ''
+            }`}
+            devices={devices}
+            selfId={selfId}
+            onError={onError}
+            onRefresh={refresh}
+            onGoStorage={() => goStorage('recycle')}
+          />
+        ) : null}
 
-      <DiscoveryPanel onError={onError} />
+        {section === 'devices' ? (
+          <>
+            <PairingPanel
+              peers={peers}
+              selfId={selfId}
+              masterId={masterId}
+              onError={onError}
+              onRefresh={refresh}
+            />
+            <DiscoveryPanel onError={onError} />
+          </>
+        ) : null}
 
-      <StatsPanel
-        statsJson={stats ? JSON.stringify(stats, null, 2) : '…'}
-        masterLabel={`master: ${shortId(masterId)} · epoch ${masterEpoch}${
-          masterId === selfId ? ' (本机)' : ''
-        }`}
-        devices={devices}
-        selfId={selfId}
-        onError={onError}
-        onRefresh={refresh}
-        onGoStorage={() => goStorage('recycle')}
-      />
+        {section === 'storage' ? (
+          <StoragePanel
+            selfId={selfId}
+            deviceIds={Object.keys(devices)}
+            peerNames={peerNames}
+            recycle={recycle}
+            onError={onError}
+            onRefresh={refresh}
+            tab={storageTab}
+            onTabChange={setStorageTab}
+          />
+        ) : null}
 
-      <StoragePanel
-        selfId={selfId}
-        deviceIds={Object.keys(devices)}
-        peerNames={peerNames}
-        recycle={recycle}
-        onError={onError}
-        onRefresh={refresh}
-        tab={storageTab}
-        onTabChange={setStorageTab}
-      />
+        {section === 'import' ? (
+          <ImportPanel
+            requests={imports}
+            issued={issued}
+            received={received}
+            onError={onError}
+            onRefresh={refresh}
+            onNotice={(m) => {
+              setMsg(m);
+            }}
+          />
+        ) : null}
 
-      <ImportPanel
-        requests={imports}
-        issued={issued}
-        received={received}
-        onError={onError}
-        onRefresh={refresh}
-        onNotice={(m) => {
-          setMsg(m);
-          if (m) toast(m, { kind: 'info' });
-        }}
-      />
+        {section === 'access' ? (
+          <>
+            <AuditPanel
+              refreshKey={tick}
+              onError={onError}
+              onRefresh={refresh}
+            />
+            <AgentsPanel refreshKey={tick} onError={onError} />
+          </>
+        ) : null}
 
-      <AuditPanel refreshKey={tick} onError={onError} onRefresh={refresh} />
+        {section === 'catalog' ? (
+          <>
+            <SpacesPanel refreshKey={tick} onError={onError} />
+            <VersionsPanel refreshKey={tick} onError={onError} />
+          </>
+        ) : null}
 
-      <AgentsPanel refreshKey={tick} onError={onError} />
-
-      <VersionsPanel refreshKey={tick} onError={onError} />
-
-      <SpacesPanel refreshKey={tick} onError={onError} />
-
-      <DangerPanel onError={onError} onRefresh={refresh} />
+        {section === 'danger' ? (
+          <DangerPanel onError={onError} onRefresh={refresh} />
+        ) : null}
+      </div>
     </div>
   );
 }

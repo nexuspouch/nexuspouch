@@ -110,23 +110,24 @@ export function StatsPanel({
 
   return (
     <section className="panel">
-      <h2>用量 stats</h2>
-      <div className="row" style={{ justifyContent: 'space-between', margin: '0.5rem 0' }}>
-        <span className="muted">{masterLabel}</span>
-        <button type="button" onClick={() => void promoteMaster()}>
-          升为本机 master
-        </button>
+      <div className="section-head">
+        <h2>用量与 master</h2>
+        <div className="row">
+          <button type="button" onClick={() => void runGc()}>
+            GC
+          </button>
+          <button type="button" onClick={() => void promoteMaster()}>
+            升为本机 master
+          </button>
+        </div>
       </div>
-      <div className="row" style={{ justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-        <span className="muted">
-          启动时会自动 GC；也可手动触发。升主时若旧 master 未入站会按配对端点主动拨号再
-          seed；并 fanout master.pointer。离线端靠重连 query 改指。
-        </span>
-        <button type="button" onClick={() => void runGc()}>
-          GC staging/回收站
-        </button>
-      </div>
-      <pre className="block">{statsJson}</pre>
+      <p className="muted" style={{ marginTop: 0 }}>
+        {masterLabel}
+      </p>
+      <p className="muted">
+        启动时会自动 GC。升主时若旧 master 未入站会按配对端点拨号再 seed，并 fanout
+        master.pointer；离线端靠重连 query 改指。
+      </p>
 
       <h3 className="subhead">设备镜像</h3>
       <p className="muted">永久删除他端镜像目录（不可进回收站；禁删本机）。</p>
@@ -171,6 +172,11 @@ export function StatsPanel({
           </tbody>
         </table>
       )}
+
+      <details className="raw-details">
+        <summary>原始 stats JSON</summary>
+        <pre className="block">{statsJson}</pre>
+      </details>
     </section>
   );
 }
